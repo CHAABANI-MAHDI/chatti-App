@@ -1,6 +1,6 @@
 import UserActions from "./UserActions";
 
-function ProfileSummaryCard({ profile, onProfile, onSettings, onLogout }) {
+function ProfileSummaryCard({ profile, onProfile, onSettings }) {
   const profileInitial = profile.name?.trim()?.charAt(0)?.toUpperCase() || "U";
 
   return (
@@ -25,11 +25,7 @@ function ProfileSummaryCard({ profile, onProfile, onSettings, onLogout }) {
         </div>
       </div>
 
-      <UserActions
-        onProfile={onProfile}
-        onSettings={onSettings}
-        onLogout={onLogout}
-      />
+      <UserActions onProfile={onProfile} onSettings={onSettings} />
     </div>
   );
 }

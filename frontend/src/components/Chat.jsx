@@ -258,7 +258,6 @@ function Chat({ currentUser, onLogout }) {
                 <UserActions
                   onProfile={openMobileProfileEditor}
                   onSettings={() => setIsMobileSettingsOpen(true)}
-                  onLogout={onLogout}
                 />
               </div>
             </div>
@@ -304,6 +303,7 @@ function Chat({ currentUser, onLogout }) {
           onClose={() => setIsMobileSettingsOpen(false)}
           preferences={mobilePreferences}
           setPreferences={setMobilePreferences}
+          onLogout={onLogout}
           description="Quick preferences for mobile chat list."
           containerClassName="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm md:hidden"
         />

@@ -5,6 +5,7 @@ function SettingsModal({
   onClose,
   preferences,
   setPreferences,
+  onLogout,
   description,
   containerClassName,
 }) {
@@ -73,6 +74,18 @@ function SettingsModal({
           <span className="text-xs text-white/70">
             {preferences.muteNotifications ? "On" : "Off"}
           </span>
+        </button>
+
+        <p className="pt-1 text-left text-xs font-semibold uppercase tracking-wide text-white/60">
+          Account
+        </p>
+
+        <button
+          type="button"
+          onClick={onLogout}
+          className="flex w-full items-center justify-center rounded-lg border border-white/20 bg-black/20 px-3 py-2 text-sm text-white/90 hover:bg-white/10"
+        >
+          Logout
         </button>
       </div>
 

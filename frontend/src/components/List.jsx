@@ -81,7 +81,6 @@ function List({ chats, selectedChatId, onSelectChat, currentUser, onLogout }) {
           profile={profile}
           onProfile={openProfileEditor}
           onSettings={() => setIsSettingsOpen(true)}
-          onLogout={onLogout}
         />
 
         <div className="mb-4 flex items-center justify-between gap-2">
@@ -149,6 +148,7 @@ function List({ chats, selectedChatId, onSelectChat, currentUser, onLogout }) {
         onClose={() => setIsSettingsOpen(false)}
         preferences={preferences}
         setPreferences={setPreferences}
+        onLogout={onLogout}
         description="Suggested quick preferences for cleaner chat experience."
         containerClassName="absolute inset-0 z-20 flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm"
       />
