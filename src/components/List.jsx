@@ -1,26 +1,17 @@
 function List({ chats, selectedChatId, onSelectChat }) {
   return (
-    <aside className="w-full border-b border-white/20 bg-[#2d4a2f]/45 p-3 md:w-[26%] md:min-w-[240px] md:max-w-[300px] md:border-b-0 md:border-r md:p-4">
+    <aside className="flex h-full w-full flex-col border-b border-white/15 bg-[#1c3126]/60 p-3 md:w-[26%] md:min-w-[240px] md:max-w-[300px] md:border-b-0 md:border-r md:p-4">
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h2 className="text-xl font-semibold text-white">Messages</h2>
-          <p className="text-xs text-white/70">Recent conversations</p>
+          <p className="text-xs text-white/75">Recent conversations</p>
         </div>
-        <span className="rounded-full border border-white/20 bg-white/10 px-2 py-1 text-xs text-white/80">
+        <span className="rounded-full border border-white/20 bg-white/10 px-2 py-1 text-xs text-white/90">
           {chats.length}
         </span>
       </div>
 
-      <div className="mb-4">
-        <input
-          type="text"
-          placeholder="Search chats..."
-          className="w-full rounded-lg border border-white/20 bg-black/15 px-3 py-2 text-sm text-white placeholder:text-white/60 outline-none ring-0"
-          readOnly
-        />
-      </div>
-
-      <div className="max-h-[240px] space-y-2 overflow-y-auto md:max-h-none">
+      <div className="flex-1 space-y-2 overflow-y-auto">
         {chats.map((chat) => {
           const isActive = chat.id === selectedChatId;
 
@@ -31,8 +22,8 @@ function List({ chats, selectedChatId, onSelectChat }) {
               onClick={() => onSelectChat(chat.id)}
               className={`w-full rounded-xl border p-3 text-left transition-all duration-200 ${
                 isActive
-                  ? "border-white/50 bg-white/20 shadow-lg"
-                  : "border-white/15 bg-black/10 hover:bg-white/12"
+                  ? "border-white/55 bg-white/20 shadow-lg"
+                  : "border-white/15 bg-black/15 hover:bg-white/15"
               }`}
             >
               <div className="flex items-start gap-3">
@@ -53,7 +44,7 @@ function List({ chats, selectedChatId, onSelectChat }) {
                       {chat.time}
                     </span>
                   </div>
-                  <p className="truncate text-sm text-white/75">
+                  <p className="truncate text-sm text-white/80">
                     {chat.lastMessage}
                   </p>
                 </div>
