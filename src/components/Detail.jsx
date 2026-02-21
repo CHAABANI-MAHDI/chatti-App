@@ -1,7 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-function Detail({ chat }) {
+function Detail({ chat, isMobile = false }) {
   const [isInfoOpen, setIsInfoOpen] = useState(false);
+
+  useEffect(() => {
+    setIsInfoOpen(false);
+  }, [chat?.id]);
 
   if (!chat) {
     return (
@@ -60,9 +64,20 @@ function Detail({ chat }) {
               }`}
             >
               <p>{message.text}</p>
-              <span className="mt-1 block text-[10px] text-white/65">
-                {chat.time.split(" ")[0]} · {index + 1}m
-              </span>
+              <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-white/65">
+                <span>{message.timestamp || chat.time}</span>
+                {message.fromMe && (
+                  <svg
+                    className={`h-3 w-3 ${
+                      message.read ? "text-lime-300" : "text-white/50"
+                    }`}
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" />
+                  </svg>
+                )}
+              </div>
             </div>
           ))}
         </div>
