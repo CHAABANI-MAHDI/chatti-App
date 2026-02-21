@@ -103,11 +103,15 @@ const sampleChats = [
 ];
 
 function Chat() {
+  // Feature: selected chat state
   const [selectedChatId, setSelectedChatId] = useState(
     sampleChats[0]?.id ?? null,
   );
+
+  // Feature: mobile sidebar toggle
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  // Feature: active chat data
   const selectedChat = useMemo(
     () => sampleChats.find((chat) => chat.id === selectedChatId) ?? null,
     [selectedChatId],
@@ -115,7 +119,9 @@ function Chat() {
 
   return (
     <>
+      {/* Feature: mobile chat layout */}
       <div className="flex h-full w-full flex-col overflow-hidden rounded-2xl border border-white/20 bg-[#15241d]/70 text-white shadow-2xl backdrop-blur-xl md:hidden">
+        {/* Feature: mobile top bar */}
         <div className="flex items-center gap-2 border-b border-white/15 bg-[#0f1a14]/75 px-3 py-3">
           <button
             type="button"
@@ -145,6 +151,7 @@ function Chat() {
           </span>
         </div>
 
+        {/* Feature: mobile sidebar chat list */}
         <div
           className={`fixed inset-y-0 left-0 z-40 w-64 border-r border-white/15 bg-[#0f1a14]/95 backdrop-blur-xl transition-transform duration-300 md:hidden ${
             sidebarOpen ? "translate-x-0" : "-translate-x-full"
@@ -199,6 +206,7 @@ function Chat() {
           </div>
         </div>
 
+        {/* Feature: mobile sidebar backdrop */}
         {sidebarOpen && (
           <div
             className="fixed inset-0 z-30 bg-black/40 md:hidden"
@@ -206,11 +214,13 @@ function Chat() {
           />
         )}
 
+        {/* Feature: mobile chat detail panel */}
         <div className="min-h-0 flex-1">
           <Detail chat={selectedChat} />
         </div>
       </div>
 
+      {/* Feature: desktop 3-panel layout */}
       <div className="hidden h-full w-full overflow-hidden rounded-2xl border border-white/20 bg-[#15241d]/70 text-white shadow-2xl backdrop-blur-xl md:flex md:flex-row">
         <List
           chats={sampleChats}
