@@ -201,10 +201,6 @@ function Detail({ chat }) {
 
       <div className="space-y-3 text-sm text-white/90">
         <div className="rounded-lg border border-white/20 bg-black/20 p-3">
-          <p className="text-[11px] text-white/60">Email</p>
-          <p className="text-white">{chat.email ?? "not-set@example.com"}</p>
-        </div>
-        <div className="rounded-lg border border-white/20 bg-black/20 p-3">
           <p className="text-[11px] text-white/60">Phone</p>
           <p className="text-white">{chat.phone ?? "+1 000 000 0000"}</p>
         </div>

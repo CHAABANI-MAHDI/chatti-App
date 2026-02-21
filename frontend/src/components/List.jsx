@@ -10,9 +10,8 @@ function List({ chats, selectedChatId, onSelectChat, currentUser, onLogout }) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [profile, setProfile] = useState({
     name: currentUser?.name || "My Profile",
-    email: currentUser?.email || "me@chatapp.dev",
     phone: currentUser?.phone || "+1 000 000 0000",
-    image: "",
+    image: currentUser?.image || "",
   });
   const [draftProfile, setDraftProfile] = useState(profile);
   const [preferences, setPreferences] = useState({
@@ -43,8 +42,8 @@ function List({ chats, selectedChatId, onSelectChat, currentUser, onLogout }) {
     setProfile((previous) => ({
       ...previous,
       name: currentUser.name || previous.name,
-      email: currentUser.email || previous.email,
       phone: currentUser.phone || previous.phone,
+      image: currentUser.image || previous.image,
     }));
   }, [currentUser]);
 

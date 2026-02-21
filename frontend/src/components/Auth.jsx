@@ -91,7 +91,6 @@ function Auth({ onAuthSuccess }) {
       const user = payload.user || {};
       onAuthSuccess({
         name: user.name || user.full_name || "User",
-        email: user.email || "",
         phone: user.phone || normalizePhone(phone),
       });
       window.history.replaceState({}, "", "/chat");

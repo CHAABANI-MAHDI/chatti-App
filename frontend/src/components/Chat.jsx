@@ -13,7 +13,6 @@ const sampleChats = [
     status: "Online",
     lastSeen: "Active now",
     avatar: "R",
-    email: "rahma@chatapp.dev",
     phone: "+1 202 555 0198",
     role: "Project Manager",
     timezone: "UTC-5",
@@ -50,7 +49,6 @@ const sampleChats = [
     status: "Away",
     lastSeen: "Last seen 8m ago",
     avatar: "H",
-    email: "helmi@chatapp.dev",
     phone: "+1 202 555 0145",
     role: "Frontend Engineer",
     timezone: "UTC+1",
@@ -80,7 +78,6 @@ const sampleChats = [
     status: "Online",
     lastSeen: "Active now",
     avatar: "M",
-    email: "maher@chatapp.dev",
     phone: "+1 202 555 0112",
     role: "Product Designer",
     timezone: "UTC+3",
@@ -113,9 +110,8 @@ function Chat({ currentUser, onLogout }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [mobileProfile, setMobileProfile] = useState({
     name: currentUser?.name || "My Profile",
-    email: currentUser?.email || "me@chatapp.dev",
     phone: currentUser?.phone || "+1 000 000 0000",
-    image: "",
+    image: currentUser?.image || "",
   });
   const [mobileDraftProfile, setMobileDraftProfile] = useState(mobileProfile);
   const [isMobileProfileOpen, setIsMobileProfileOpen] = useState(false);
@@ -139,8 +135,8 @@ function Chat({ currentUser, onLogout }) {
     setMobileProfile((previous) => ({
       ...previous,
       name: currentUser.name || previous.name,
-      email: currentUser.email || previous.email,
       phone: currentUser.phone || previous.phone,
+      image: currentUser.image || previous.image,
     }));
   }, [currentUser]);
 
@@ -254,7 +250,7 @@ function Chat({ currentUser, onLogout }) {
                       {mobileProfile.name}
                     </p>
                     <p className="truncate text-xs text-white/65">
-                      {mobileProfile.email}
+                      {mobileProfile.phone}
                     </p>
                   </div>
                 </div>

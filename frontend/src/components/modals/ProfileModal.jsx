@@ -61,21 +61,6 @@ function ProfileModal({
           />
         </div>
         <div>
-          <p className="mb-1 text-left text-xs text-white/70">Email</p>
-          <input
-            type="email"
-            value={draftProfile.email}
-            onChange={(event) =>
-              setDraftProfile((previous) => ({
-                ...previous,
-                email: event.target.value,
-              }))
-            }
-            placeholder="Your email"
-            className="w-full rounded-lg border border-white/20 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-white/60 outline-none"
-          />
-        </div>
-        <div>
           <p className="mb-1 text-left text-xs text-white/70">Phone</p>
           <input
             type="text"

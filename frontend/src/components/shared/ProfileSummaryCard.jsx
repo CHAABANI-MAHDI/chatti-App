@@ -21,7 +21,7 @@ function ProfileSummaryCard({ profile, onProfile, onSettings, onLogout }) {
           <p className="truncate text-sm font-semibold text-white/95">
             {profile.name}
           </p>
-          <p className="truncate text-xs text-white/65">{profile.email}</p>
+          <p className="truncate text-xs text-white/65">{profile.phone}</p>
         </div>
       </div>
 
