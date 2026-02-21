@@ -1,96 +1,105 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
-const USERS_STORAGE_KEY = "chat-firebase-app-users";
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
 
 function Auth({ onAuthSuccess }) {
-  const [mode, setMode] = useState("signin");
-  const [formData, setFormData] = useState({
-    name: "",
-    email: "",
-    phone: "",
-    password: "",
-    confirmPassword: "",
-  });
+  const [phone, setPhone] = useState("");
+  const [otp, setOtp] = useState("");
+  const [isSendingCode, setIsSendingCode] = useState(false);
+  const [isVerifyingCode, setIsVerifyingCode] = useState(false);
+  const [codeSent, setCodeSent] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
 
-  const updateField = (field, value) => {
-    setFormData((previous) => ({ ...previous, [field]: value }));
-  };
+  const sanitizedOtp = useMemo(() => otp.replace(/\D/g, "").slice(0, 6), [otp]);
 
-  const getStoredUsers = () => {
-    try {
-      const rawUsers = localStorage.getItem(USERS_STORAGE_KEY);
-      return rawUsers ? JSON.parse(rawUsers) : [];
-    } catch {
-      return [];
-    }
-  };
+  const normalizePhone = (value) => value.trim().replace(/[^\d+]/g, "");
 
-  const saveUsers = (users) => {
-    localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
-  };
-
-  const handleSubmit = (event) => {
+  const sendOtp = async (event) => {
     event.preventDefault();
     setErrorMessage("");
+    setSuccessMessage("");
 
-    const email = formData.email.trim().toLowerCase();
-    const password = formData.password;
-    const users = getStoredUsers();
-
-    if (!email || !password) {
-      setErrorMessage("Email and password are required.");
+    const normalizedPhone = normalizePhone(phone);
+    if (!normalizedPhone || !normalizedPhone.startsWith("+")) {
+      setErrorMessage(
+        "Enter a valid phone number with country code (example: +216123456).",
+      );
       return;
     }
 
-    if (mode === "signup") {
-      const name = formData.name.trim();
-      const phone = formData.phone.trim();
+    setIsSendingCode(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/send-otp`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ phone: normalizedPhone }),
+      });
 
-      if (!name || !phone) {
-        setErrorMessage("Name and phone are required for sign up.");
-        return;
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.message || "Failed to send OTP code.");
       }
 
-      if (password.length < 6) {
-        setErrorMessage("Password must be at least 6 characters.");
-        return;
-      }
+      setCodeSent(true);
+      setSuccessMessage("Code sent successfully. Please check your phone.");
+    } catch (error) {
+      setErrorMessage(error.message || "Failed to send OTP code.");
+    } finally {
+      setIsSendingCode(false);
+    }
+  };
 
-      if (password !== formData.confirmPassword) {
-        setErrorMessage("Confirm password does not match.");
-        return;
-      }
+  const verifyOtp = async (event) => {
+    event.preventDefault();
+    setErrorMessage("");
+    setSuccessMessage("");
 
-      const emailExists = users.some((user) => user.email === email);
-      if (emailExists) {
-        setErrorMessage("This email is already used. Please sign in.");
-        return;
-      }
-
-      const newUser = {
-        id: Date.now(),
-        name,
-        email,
-        phone,
-        password,
-      };
-
-      saveUsers([...users, newUser]);
-      onAuthSuccess(newUser);
+    if (!codeSent) {
+      setErrorMessage("Send the code first.");
       return;
     }
 
-    const foundUser = users.find(
-      (user) => user.email === email && user.password === password,
-    );
-
-    if (!foundUser) {
-      setErrorMessage("Invalid email or password.");
+    if (sanitizedOtp.length !== 6) {
+      setErrorMessage("Enter the 6-digit OTP code.");
       return;
     }
 
-    onAuthSuccess(foundUser);
+    setIsVerifyingCode(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/verify-otp`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          phone: normalizePhone(phone),
+          token: sanitizedOtp,
+        }),
+      });
+
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.message || "OTP verification failed.");
+      }
+
+      setSuccessMessage("Phone verified successfully. Redirecting to chat...");
+
+      const user = payload.user || {};
+      onAuthSuccess({
+        name: user.name || user.full_name || "User",
+        email: user.email || "",
+        phone: user.phone || normalizePhone(phone),
+      });
+      window.history.replaceState({}, "", "/chat");
+    } catch (error) {
+      setErrorMessage(error.message || "OTP verification failed.");
+    } finally {
+      setIsVerifyingCode(false);
+    }
   };
 
   return (
@@ -98,111 +107,57 @@ function Auth({ onAuthSuccess }) {
       <div className="w-full rounded-3xl border border-white/25 bg-[#132219]/75 p-6 text-white shadow-2xl backdrop-blur-2xl sm:p-7">
         <div className="mb-5">
           <h1 className="text-left text-2xl font-semibold tracking-tight text-white">
-            {mode === "signin" ? "Welcome back" : "Create account"}
+            Phone Sign In
           </h1>
           <p className="mt-1 text-left text-sm text-white/70">
-            {mode === "signin"
-              ? "Sign in to continue to your chats"
-              : "Sign up to start chatting"}
+            Use your phone number and one-time code to continue.
           </p>
         </div>
 
-              <div className="mb-5 grid grid-cols-2 rounded-xl border border-white/20 bg-black/20 p-1">
-                  {/* Feature: switch between sign in and sign up */}
-          <button
-            type="button"
-            onClick={() => {
-              setMode("signin");
-              setErrorMessage("");
-            }}
-            className={`rounded-lg px-3 py-2 text-sm transition-colors ${
-              mode === "signin"
-                ? "bg-white/15 text-white"
-                : "text-white/70 hover:text-white"
-            }`}
-          >
-            Sign In
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setMode("signup");
-              setErrorMessage("");
-            }}
-            className={`rounded-lg px-3 py-2 text-sm transition-colors ${
-              mode === "signup"
-                ? "bg-white/15 text-white"
-                : "text-white/70 hover:text-white"
-            }`}
-          >
-            Sign Up
-          </button>
-        </div>
+        <form className="space-y-3">
+          <div>
+            <p className="mb-1 text-left text-xs text-white/70">Phone Number</p>
+            <input
+              type="tel"
+              value={phone}
+              onChange={(event) => setPhone(event.target.value)}
+              placeholder="+216123456"
+              className="w-full rounded-lg border border-white/20 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-white/55 outline-none"
+            />
+            <p className="mt-1 text-left text-[11px] text-white/55">
+              Include country code (e.g. +216)
+            </p>
+          </div>
 
-        <form onSubmit={handleSubmit} className="space-y-3">
-          {mode === "signup" && (
-            <>
-              <div>
-                <p className="mb-1 text-left text-xs text-white/70">Name</p>
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(event) => updateField("name", event.target.value)}
-                  placeholder="Your full name"
-                  className="w-full rounded-lg border border-white/20 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-white/55 outline-none"
-                />
-              </div>
-              <div>
-                <p className="mb-1 text-left text-xs text-white/70">Phone</p>
-                <input
-                  type="text"
-                  value={formData.phone}
-                  onChange={(event) => updateField("phone", event.target.value)}
-                  placeholder="Your phone number"
-                  className="w-full rounded-lg border border-white/20 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-white/55 outline-none"
-                />
-              </div>
-            </>
-          )}
+          <button
+            type="button"
+            onClick={sendOtp}
+            disabled={isSendingCode}
+            className="mt-1 flex w-full items-center justify-center gap-2 rounded-lg bg-[#5e8b5a]/85 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#5e8b5a] disabled:cursor-not-allowed disabled:opacity-75"
+          >
+            {isSendingCode ? (
+              <>
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/35 border-t-white" />
+                Sending...
+              </>
+            ) : (
+              "Send Code"
+            )}
+          </button>
 
           <div>
-            <p className="mb-1 text-left text-xs text-white/70">Email</p>
+            <p className="mb-1 text-left text-xs text-white/70">OTP Code</p>
             <input
-              type="email"
-              value={formData.email}
-              onChange={(event) => updateField("email", event.target.value)}
-              placeholder="Your email"
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              disabled={!codeSent || isSendingCode}
+              value={sanitizedOtp}
+              onChange={(event) => setOtp(event.target.value)}
+              placeholder="6-digit code"
               className="w-full rounded-lg border border-white/20 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-white/55 outline-none"
             />
           </div>
-
-          <div>
-            <p className="mb-1 text-left text-xs text-white/70">Password</p>
-            <input
-              type="password"
-              value={formData.password}
-              onChange={(event) => updateField("password", event.target.value)}
-              placeholder="Your password"
-              className="w-full rounded-lg border border-white/20 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-white/55 outline-none"
-            />
-          </div>
-
-          {mode === "signup" && (
-            <div>
-              <p className="mb-1 text-left text-xs text-white/70">
-                Confirm password
-              </p>
-              <input
-                type="password"
-                value={formData.confirmPassword}
-                onChange={(event) =>
-                  updateField("confirmPassword", event.target.value)
-                }
-                placeholder="Repeat password"
-                className="w-full rounded-lg border border-white/20 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-white/55 outline-none"
-              />
-            </div>
-          )}
 
           {errorMessage && (
             <p className="rounded-lg border border-rose-300/30 bg-rose-400/10 px-3 py-2 text-xs text-rose-100">
@@ -210,11 +165,26 @@ function Auth({ onAuthSuccess }) {
             </p>
           )}
 
+          {successMessage && (
+            <p className="rounded-lg border border-emerald-300/30 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-100">
+              {successMessage}
+            </p>
+          )}
+
           <button
-            type="submit"
-            className="mt-1 w-full rounded-lg bg-[#5e8b5a]/85 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#5e8b5a]"
+            type="button"
+            onClick={verifyOtp}
+            disabled={!codeSent || isVerifyingCode || sanitizedOtp.length !== 6}
+            className="mt-1 flex w-full items-center justify-center gap-2 rounded-lg bg-[#5e8b5a]/85 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#5e8b5a] disabled:cursor-not-allowed disabled:opacity-75"
           >
-            {mode === "signin" ? "Sign In" : "Create Account"}
+            {isVerifyingCode ? (
+              <>
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/35 border-t-white" />
+                Verifying...
+              </>
+            ) : (
+              "Verify Code"
+            )}
           </button>
         </form>
       </div>
