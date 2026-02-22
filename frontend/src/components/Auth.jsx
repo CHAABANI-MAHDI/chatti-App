@@ -6,6 +6,7 @@ const API_BASE_URL =
 function Auth({ onAuthSuccess }) {
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
+  const [rememberMe, setRememberMe] = useState(true);
   const [isSendingCode, setIsSendingCode] = useState(false);
   const [isVerifyingCode, setIsVerifyingCode] = useState(false);
   const [codeSent, setCodeSent] = useState(false);
@@ -92,6 +93,8 @@ function Auth({ onAuthSuccess }) {
       onAuthSuccess({
         name: user.name || user.full_name || "User",
         phone: user.phone || normalizePhone(phone),
+        accessToken: payload.session?.access_token || "",
+        rememberMe,
       });
       window.history.replaceState({}, "", "/chat");
     } catch (error) {
@@ -157,6 +160,16 @@ function Auth({ onAuthSuccess }) {
               className="w-full rounded-lg border border-white/20 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-white/55 outline-none"
             />
           </div>
+
+          <label className="flex items-center gap-2 text-xs text-white/75">
+            <input
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(event) => setRememberMe(event.target.checked)}
+              className="h-3.5 w-3.5 rounded border-white/30 bg-black/20"
+            />
+            Keep me signed-in on this device
+          </label>
 
           {errorMessage && (
             <p className="rounded-lg border border-rose-300/30 bg-rose-400/10 px-3 py-2 text-xs text-rose-100">
