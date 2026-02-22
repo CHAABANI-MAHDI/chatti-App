@@ -3,37 +3,122 @@ import Auth from "./components/Auth";
 import Chat from "./components/Chat";
 import ProfileOnboarding from "./components/ProfileOnboarding";
 
-const SESSION_STORAGE_KEY = "chat-firebase-app-session";
+const PERSISTENT_SESSION_KEY = "chat-firebase-app-session-persistent";
+const TAB_SESSION_KEY = "chat-firebase-app-session-tab";
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
+const PERSISTENT_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const TAB_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
-const App = () => {
-  const [currentUser, setCurrentUser] = useState(() => {
-    try {
-      const savedSession = localStorage.getItem(SESSION_STORAGE_KEY);
-      return savedSession ? JSON.parse(savedSession) : null;
-    } catch {
+const parseApiPayload = async (response) => {
+  const text = await response.text();
+
+  if (!text) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {
+      message: text.includes("<!DOCTYPE")
+        ? `Request failed (${response.status}). Backend route may be missing or server was not restarted.`
+        : text,
+    };
+  }
+};
+
+const readStoredSession = (storage, key) => {
+  try {
+    const rawValue = storage.getItem(key);
+    if (!rawValue) {
       return null;
     }
-  });
+
+    const parsedValue = JSON.parse(rawValue);
+    const expiresAt = Number(parsedValue?.expiresAt || 0);
+
+    if (!parsedValue?.user || !expiresAt || Date.now() > expiresAt) {
+      storage.removeItem(key);
+      return null;
+    }
+
+    return {
+      user: parsedValue.user,
+      rememberMe: Boolean(parsedValue.rememberMe),
+    };
+  } catch {
+    storage.removeItem(key);
+    return null;
+  }
+};
+
+const initialSession = (() => {
+  const tabSession = readStoredSession(window.sessionStorage, TAB_SESSION_KEY);
+  if (tabSession) {
+    return tabSession;
+  }
+
+  const persistentSession = readStoredSession(
+    window.localStorage,
+    PERSISTENT_SESSION_KEY,
+  );
+  return persistentSession || { user: null, rememberMe: true };
+})();
+
+const App = () => {
+  const [currentUser, setCurrentUser] = useState(initialSession.user);
+  const [rememberMeSession, setRememberMeSession] = useState(
+    initialSession.rememberMe,
+  );
   const [pendingUser, setPendingUser] = useState(null);
 
-  const startUserSession = (user) => {
-    setCurrentUser(user);
-    setPendingUser(null);
-    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(user));
+  const persistSession = (user, rememberMe) => {
+    const sessionPayload = {
+      user,
+      rememberMe,
+      expiresAt:
+        Date.now() +
+        (rememberMe ? PERSISTENT_SESSION_TTL_MS : TAB_SESSION_TTL_MS),
+    };
+
+    if (rememberMe) {
+      localStorage.setItem(
+        PERSISTENT_SESSION_KEY,
+        JSON.stringify(sessionPayload),
+      );
+      sessionStorage.removeItem(TAB_SESSION_KEY);
+      return;
+    }
+
+    sessionStorage.setItem(TAB_SESSION_KEY, JSON.stringify(sessionPayload));
+    localStorage.removeItem(PERSISTENT_SESSION_KEY);
   };
 
-  const fetchProfileByPhone = async (phone) => {
+  const startUserSession = (user, rememberMe) => {
+    setCurrentUser(user);
+    setPendingUser(null);
+    setRememberMeSession(rememberMe);
+    persistSession(user, rememberMe);
+  };
+
+  const fetchProfileByPhone = async (phone, accessToken = "") => {
     const response = await fetch(
       `${API_BASE_URL}/profile/${encodeURIComponent(phone)}`,
+      {
+        headers: accessToken
+          ? {
+              Authorization: `Bearer ${accessToken}`,
+            }
+          : undefined,
+      },
     );
 
     if (response.status === 404) {
       return null;
     }
 
-    const payload = await response.json();
+    const payload = await parseApiPayload(response);
     if (!response.ok) {
       throw new Error(payload.message || "Failed to fetch profile.");
     }
@@ -41,11 +126,22 @@ const App = () => {
     return payload.profile || null;
   };
 
-  const saveProfile = async ({ phone, name, image, statusText = "" }) => {
+  const saveProfile = async ({
+    phone,
+    name,
+    image,
+    statusText = "",
+    accessToken = "",
+  }) => {
     const response = await fetch(`${API_BASE_URL}/profile`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
+        ...(accessToken
+          ? {
+              Authorization: `Bearer ${accessToken}`,
+            }
+          : {}),
       },
       body: JSON.stringify({
         phone,
@@ -55,7 +151,7 @@ const App = () => {
       }),
     });
 
-    const payload = await response.json();
+    const payload = await parseApiPayload(response);
     if (!response.ok) {
       throw new Error(payload.message || "Failed to save profile.");
     }
@@ -68,19 +164,27 @@ const App = () => {
       name: user.name,
       phone: user.phone,
       image: user.image || "",
+      accessToken: user.accessToken || "",
+      rememberMe: Boolean(user.rememberMe),
     };
 
     try {
-      const existingProfile = await fetchProfileByPhone(authUser.phone);
+      const existingProfile = await fetchProfileByPhone(
+        authUser.phone,
+        authUser.accessToken,
+      );
       if (!existingProfile) {
         setPendingUser(authUser);
         return;
       }
 
-      startUserSession({
-        ...authUser,
-        ...existingProfile,
-      });
+      startUserSession(
+        {
+          ...authUser,
+          ...existingProfile,
+        },
+        authUser.rememberMe,
+      );
     } catch {
       setPendingUser(authUser);
     }
@@ -95,13 +199,17 @@ const App = () => {
       phone: pendingUser.phone,
       name: name || pendingUser.name || "User",
       image: image || "",
+      accessToken: pendingUser.accessToken || "",
     });
 
-    startUserSession({
-      ...pendingUser,
-      ...savedProfile,
-      phone: pendingUser.phone,
-    });
+    startUserSession(
+      {
+        ...pendingUser,
+        ...savedProfile,
+        phone: pendingUser.phone,
+      },
+      pendingUser.rememberMe,
+    );
   };
 
   const handleOnboardingSkip = async () => {
@@ -113,13 +221,17 @@ const App = () => {
       phone: pendingUser.phone,
       name: pendingUser.name || "User",
       image: "",
+      accessToken: pendingUser.accessToken || "",
     });
 
-    startUserSession({
-      ...pendingUser,
-      ...savedProfile,
-      phone: pendingUser.phone,
-    });
+    startUserSession(
+      {
+        ...pendingUser,
+        ...savedProfile,
+        phone: pendingUser.phone,
+      },
+      pendingUser.rememberMe,
+    );
   };
 
   const handleProfileSave = async (updates) => {
@@ -132,6 +244,7 @@ const App = () => {
       name: updates?.name || currentUser.name || "User",
       image: updates?.image || "",
       statusText: updates?.statusText || "",
+      accessToken: currentUser.accessToken || "",
     });
 
     const nextUser = {
@@ -141,12 +254,14 @@ const App = () => {
     };
 
     setCurrentUser(nextUser);
-    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(nextUser));
+    persistSession(nextUser, rememberMeSession);
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
-    localStorage.removeItem(SESSION_STORAGE_KEY);
+    setRememberMeSession(true);
+    localStorage.removeItem(PERSISTENT_SESSION_KEY);
+    sessionStorage.removeItem(TAB_SESSION_KEY);
   };
 
   return (
