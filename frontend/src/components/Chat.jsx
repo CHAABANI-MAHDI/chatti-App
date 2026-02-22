@@ -103,7 +103,7 @@ const sampleChats = [
   },
 ];
 
-function Chat({ currentUser, onLogout }) {
+function Chat({ currentUser, onLogout, onProfileSave }) {
   const [selectedChatId, setSelectedChatId] = useState(
     sampleChats[0]?.id ?? null,
   );
@@ -165,9 +165,14 @@ function Chat({ currentUser, onLogout }) {
     fileReader.readAsDataURL(file);
   };
 
-  const saveMobileProfile = () => {
-    setMobileProfile(mobileDraftProfile);
-    setIsMobileProfileOpen(false);
+  const saveMobileProfile = async () => {
+    try {
+      await onProfileSave?.(mobileDraftProfile);
+      setMobileProfile(mobileDraftProfile);
+      setIsMobileProfileOpen(false);
+    } catch (error) {
+      alert(error.message || "Failed to save profile.");
+    }
   };
 
   return (
@@ -320,6 +325,7 @@ function Chat({ currentUser, onLogout }) {
           onSelectChat={setSelectedChatId}
           currentUser={currentUser}
           onLogout={onLogout}
+          onProfileSave={onProfileSave}
         />
         <Detail chat={selectedChat} />
       </div>

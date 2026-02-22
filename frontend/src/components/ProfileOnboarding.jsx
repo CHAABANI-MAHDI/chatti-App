@@ -6,6 +6,7 @@ function ProfileOnboarding({ phone, initialName, onComplete, onSkip }) {
   );
   const [image, setImage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleImageUpload = (event) => {
     const file = event.target.files?.[0];
@@ -21,7 +22,7 @@ function ProfileOnboarding({ phone, initialName, onComplete, onSkip }) {
     fileReader.readAsDataURL(file);
   };
 
-  const handleContinue = (event) => {
+  const handleContinue = async (event) => {
     event.preventDefault();
 
     const trimmedName = name.trim();
@@ -31,10 +32,31 @@ function ProfileOnboarding({ phone, initialName, onComplete, onSkip }) {
     }
 
     setErrorMessage("");
-    onComplete({
-      name: trimmedName,
-      image,
-    });
+
+    try {
+      setIsSubmitting(true);
+      await onComplete({
+        name: trimmedName,
+        image,
+      });
+    } catch (error) {
+      setErrorMessage(error.message || "Failed to save profile.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleSkip = async () => {
+    setErrorMessage("");
+
+    try {
+      setIsSubmitting(true);
+      await onSkip();
+    } catch (error) {
+      setErrorMessage(error.message || "Failed to continue.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const previewInitial = name.trim().charAt(0).toUpperCase() || "U";
@@ -101,16 +123,18 @@ function ProfileOnboarding({ phone, initialName, onComplete, onSkip }) {
           <div className="mt-1 flex gap-2">
             <button
               type="button"
-              onClick={onSkip}
+              onClick={handleSkip}
+              disabled={isSubmitting}
               className="w-full rounded-lg border border-white/20 bg-white/10 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-white/15"
             >
               Skip
             </button>
             <button
               type="submit"
+              disabled={isSubmitting}
               className="w-full rounded-lg bg-[#5e8b5a]/85 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#5e8b5a]"
             >
-              Continue
+              {isSubmitting ? "Saving..." : "Continue"}
             </button>
           </div>
         </form>

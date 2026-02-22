@@ -7,6 +7,7 @@ dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 5000;
+const profilesTable = process.env.PROFILES_TABLE || "profiles";
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
@@ -24,6 +25,7 @@ const supabase =
 const normalizePhone = (value = "") => value.trim().replace(/[^\d+]/g, "");
 
 const validatePhone = (phone) => /^\+[1-9]\d{7,14}$/.test(phone);
+const normalizePhoneForDb = (phone) => phone.replace(/\D/g, "");
 
 const mapSmsProviderError = (message = "") => {
   const rawMessage = String(message);
@@ -37,6 +39,14 @@ const mapSmsProviderError = (message = "") => {
 
   return rawMessage || "Failed to send OTP.";
 };
+
+const mapProfileRecord = (record = {}) => ({
+  id: record.id || null,
+  phone: record.phone || "",
+  name: record.display_name || "User",
+  image: record.avatar_url || "",
+  statusText: record.status_text || "",
+});
 
 app.use(cors());
 app.use(express.json());
@@ -119,13 +129,121 @@ app.post("/verify-otp", async (req, res) => {
     user: {
       id: data?.user?.id,
       phone: data?.user?.phone || phone,
-      email: data?.user?.email || "",
       name: data?.user?.user_metadata?.full_name || "User",
     },
     session: {
       access_token: data?.session?.access_token || null,
       refresh_token: data?.session?.refresh_token || null,
     },
+  });
+});
+
+app.get("/profile/:phone", async (req, res) => {
+  if (!supabase) {
+    return res.status(500).json({
+      message:
+        "Supabase is not configured. Add SUPABASE_URL and SUPABASE_ANON_KEY.",
+    });
+  }
+
+  const rawPhone = normalizePhone(String(req.params?.phone || ""));
+
+  if (!validatePhone(rawPhone)) {
+    return res.status(400).json({
+      message:
+        "Phone must include country code in E.164 format (example: +216123456).",
+    });
+  }
+
+  const phoneForDb = normalizePhoneForDb(rawPhone);
+  const { data, error } = await supabase
+    .from(profilesTable)
+    .select("id, phone, display_name, avatar_url, status_text")
+    .eq("phone", phoneForDb)
+    .limit(1);
+
+  if (error) {
+    return res.status(500).json({
+      message: error.message || "Failed to fetch profile.",
+    });
+  }
+
+  const record = data?.[0];
+  if (!record) {
+    return res.status(404).json({ message: "Profile not found." });
+  }
+
+  return res.status(200).json({
+    profile: mapProfileRecord(record),
+  });
+});
+
+app.put("/profile", async (req, res) => {
+  if (!supabase) {
+    return res.status(500).json({
+      message:
+        "Supabase is not configured. Add SUPABASE_URL and SUPABASE_ANON_KEY.",
+    });
+  }
+
+  const rawPhone = normalizePhone(req.body?.phone);
+  const displayName = String(req.body?.name || "").trim() || "User";
+  const avatarUrl = String(req.body?.image || "").trim();
+  const statusText = String(req.body?.statusText || "").trim();
+
+  if (!validatePhone(rawPhone)) {
+    return res.status(400).json({
+      message:
+        "Phone must include country code in E.164 format (example: +216123456).",
+    });
+  }
+
+  const phoneForDb = normalizePhoneForDb(rawPhone);
+
+  const { data: existingRecords, error: findError } = await supabase
+    .from(profilesTable)
+    .select("id")
+    .eq("phone", phoneForDb)
+    .limit(1);
+
+  if (findError) {
+    return res.status(500).json({
+      message: findError.message || "Failed to fetch current profile.",
+    });
+  }
+
+  const payload = {
+    phone: phoneForDb,
+    display_name: displayName,
+    avatar_url: avatarUrl || null,
+    status_text: statusText || null,
+  };
+
+  let writeQuery = supabase.from(profilesTable);
+  if (existingRecords?.[0]?.id) {
+    writeQuery = writeQuery
+      .update(payload)
+      .eq("id", existingRecords[0].id)
+      .select("id, phone, display_name, avatar_url, status_text")
+      .single();
+  } else {
+    writeQuery = writeQuery
+      .insert(payload)
+      .select("id, phone, display_name, avatar_url, status_text")
+      .single();
+  }
+
+  const { data: savedProfile, error: writeError } = await writeQuery;
+
+  if (writeError) {
+    return res.status(500).json({
+      message: writeError.message || "Failed to save profile.",
+    });
+  }
+
+  return res.status(200).json({
+    message: "Profile saved successfully.",
+    profile: mapProfileRecord(savedProfile),
   });
 });
 

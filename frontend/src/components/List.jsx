@@ -4,7 +4,14 @@ import ProfileModal from "./modals/ProfileModal";
 import SettingsModal from "./modals/SettingsModal";
 import ProfileSummaryCard from "./shared/ProfileSummaryCard";
 
-function List({ chats, selectedChatId, onSelectChat, currentUser, onLogout }) {
+function List({
+  chats,
+  selectedChatId,
+  onSelectChat,
+  currentUser,
+  onLogout,
+  onProfileSave,
+}) {
   const [searchTerm, setSearchTerm] = useState("");
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -69,9 +76,14 @@ function List({ chats, selectedChatId, onSelectChat, currentUser, onLogout }) {
     fileReader.readAsDataURL(file);
   };
 
-  const saveProfile = () => {
-    setProfile(draftProfile);
-    setIsProfileOpen(false);
+  const saveProfile = async () => {
+    try {
+      await onProfileSave?.(draftProfile);
+      setProfile(draftProfile);
+      setIsProfileOpen(false);
+    } catch (error) {
+      alert(error.message || "Failed to save profile.");
+    }
   };
 
   return (
