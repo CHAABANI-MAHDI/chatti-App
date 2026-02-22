@@ -65,14 +65,9 @@ function ProfileModal({
           <input
             type="text"
             value={draftProfile.phone}
-            onChange={(event) =>
-              setDraftProfile((previous) => ({
-                ...previous,
-                phone: event.target.value,
-              }))
-            }
+            disabled
             placeholder="Phone number"
-            className="w-full rounded-lg border border-white/20 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-white/60 outline-none"
+            className="w-full rounded-lg border border-white/20 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-white/60 outline-none disabled:cursor-not-allowed disabled:opacity-70"
           />
         </div>
       </div>
