@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import ChatListItem from "./chat/ChatListItem";
+import AddUserByPhoneModal from "./modals/AddUserByPhoneModal";
 import ProfileModal from "./modals/ProfileModal";
 import SettingsModal from "./modals/SettingsModal";
 import ProfileSummaryCard from "./shared/ProfileSummaryCard";
@@ -11,13 +12,17 @@ function List({
   currentUser,
   onLogout,
   onProfileSave,
+  onSearchUser,
+  onAddUser,
 }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isAddUserOpen, setIsAddUserOpen] = useState(false);
   const [profile, setProfile] = useState({
     name: currentUser?.name || "My Profile",
-    phone: currentUser?.phone || "+1 000 000 0000",
+    email: currentUser?.email || "",
+    statusText: currentUser?.statusText || "",
     image: currentUser?.image || "",
   });
   const [draftProfile, setDraftProfile] = useState(profile);
@@ -49,7 +54,8 @@ function List({
     setProfile((previous) => ({
       ...previous,
       name: currentUser.name || previous.name,
-      phone: currentUser.phone || previous.phone,
+      email: currentUser.email || previous.email,
+      statusText: currentUser.statusText || previous.statusText,
       image: currentUser.image || previous.image,
     }));
   }, [currentUser]);
@@ -118,6 +124,7 @@ function List({
           <button
             type="button"
             title="Add new user"
+            onClick={() => setIsAddUserOpen(true)}
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/20 bg-white/10 text-lg leading-none text-white/90 transition-colors hover:bg-white/15"
           >
             +
@@ -163,6 +170,15 @@ function List({
         onLogout={onLogout}
         description="Suggested quick preferences for cleaner chat experience."
         containerClassName="absolute inset-0 z-20 flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm"
+      />
+
+      <AddUserByPhoneModal
+        isOpen={isAddUserOpen}
+        onClose={() => setIsAddUserOpen(false)}
+        existingPhones={chats.map((chat) => chat.phone)}
+        currentUserPhone={currentUser?.phone || ""}
+        onSearchUser={onSearchUser}
+        onAddUser={onAddUser}
       />
     </aside>
   );
