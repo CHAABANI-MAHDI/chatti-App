@@ -61,13 +61,33 @@ function ProfileModal({
           />
         </div>
         <div>
-          <p className="mb-1 text-left text-xs text-white/70">Phone</p>
+          <p className="mb-1 text-left text-xs text-white/70">Email</p>
           <input
-            type="text"
-            value={draftProfile.phone}
-            disabled
-            placeholder="Phone number"
-            className="w-full rounded-lg border border-white/20 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-white/60 outline-none disabled:cursor-not-allowed disabled:opacity-70"
+            type="email"
+            value={draftProfile.email || ""}
+            onChange={(event) =>
+              setDraftProfile((previous) => ({
+                ...previous,
+                email: event.target.value,
+              }))
+            }
+            placeholder="Email address"
+            className="w-full rounded-lg border border-white/20 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-white/60 outline-none"
+          />
+        </div>
+        <div>
+          <p className="mb-1 text-left text-xs text-white/70">Short bio</p>
+          <textarea
+            rows={3}
+            value={draftProfile.statusText || ""}
+            onChange={(event) =>
+              setDraftProfile((previous) => ({
+                ...previous,
+                statusText: event.target.value,
+              }))
+            }
+            placeholder="Write a short bio"
+            className="w-full rounded-lg border border-white/20 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-white/60 outline-none"
           />
         </div>
       </div>

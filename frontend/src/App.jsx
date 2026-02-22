@@ -1,7 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Auth from "./components/Auth";
 import Chat from "./components/Chat";
-import ProfileOnboarding from "./components/ProfileOnboarding";
 
 const PERSISTENT_SESSION_KEY = "chat-firebase-app-session-persistent";
 const TAB_SESSION_KEY = "chat-firebase-app-session-tab";
@@ -71,7 +70,6 @@ const App = () => {
   const [rememberMeSession, setRememberMeSession] = useState(
     initialSession.rememberMe,
   );
-  const [pendingUser, setPendingUser] = useState(null);
 
   const persistSession = (user, rememberMe) => {
     const sessionPayload = {
@@ -97,7 +95,6 @@ const App = () => {
 
   const startUserSession = (user, rememberMe) => {
     setCurrentUser(user);
-    setPendingUser(null);
     setRememberMeSession(rememberMe);
     persistSession(user, rememberMe);
   };
@@ -127,13 +124,14 @@ const App = () => {
   };
 
   const saveProfile = async ({
-    phone,
     name,
     image,
+    email,
+    phone,
     statusText = "",
     accessToken = "",
   }) => {
-    const response = await fetch(`${API_BASE_URL}/profile`, {
+    const response = await fetch(`${API_BASE_URL}/auth/me/profile`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
@@ -144,9 +142,10 @@ const App = () => {
           : {}),
       },
       body: JSON.stringify({
-        phone,
         name,
         image,
+        email,
+        phone,
         statusText,
       }),
     });
@@ -156,91 +155,98 @@ const App = () => {
       throw new Error(payload.message || "Failed to save profile.");
     }
 
-    return payload.profile || null;
+    return payload.user || null;
   };
 
   const handleAuthSuccess = async (user) => {
     const authUser = {
-      name: user.name,
-      phone: user.phone,
+      name: user.name || "User",
+      email: user.email || "",
+      phone: user.phone || "",
       image: user.image || "",
+      statusText: user.statusText || "",
       accessToken: user.accessToken || "",
       rememberMe: Boolean(user.rememberMe),
     };
+
+    if (!authUser.phone) {
+      startUserSession(authUser, authUser.rememberMe);
+      return;
+    }
 
     try {
       const existingProfile = await fetchProfileByPhone(
         authUser.phone,
         authUser.accessToken,
       );
-      if (!existingProfile) {
-        setPendingUser(authUser);
-        return;
-      }
 
       startUserSession(
         {
           ...authUser,
-          ...existingProfile,
+          ...(existingProfile || {}),
+          email: authUser.email,
+          accessToken: authUser.accessToken,
         },
         authUser.rememberMe,
       );
     } catch {
-      setPendingUser(authUser);
+      startUserSession(authUser, authUser.rememberMe);
     }
   };
 
-  const handleOnboardingComplete = async ({ name, image }) => {
-    if (!pendingUser) {
+  useEffect(() => {
+    const hash = String(window.location.hash || "");
+    if (!hash || currentUser) {
       return;
     }
 
-    const savedProfile = await saveProfile({
-      phone: pendingUser.phone,
-      name: name || pendingUser.name || "User",
-      image: image || "",
-      accessToken: pendingUser.accessToken || "",
-    });
+    const hashParams = new URLSearchParams(hash.replace(/^#/, ""));
+    const accessToken = String(hashParams.get("access_token") || "").trim();
+    const oauthError = String(hashParams.get("error_description") || "").trim();
 
-    startUserSession(
-      {
-        ...pendingUser,
-        ...savedProfile,
-        phone: pendingUser.phone,
-      },
-      pendingUser.rememberMe,
-    );
-  };
-
-  const handleOnboardingSkip = async () => {
-    if (!pendingUser) {
+    if (oauthError) {
+      console.error(oauthError);
+      window.history.replaceState({}, "", window.location.pathname);
       return;
     }
 
-    const savedProfile = await saveProfile({
-      phone: pendingUser.phone,
-      name: pendingUser.name || "User",
-      image: "",
-      accessToken: pendingUser.accessToken || "",
-    });
+    if (!accessToken) {
+      return;
+    }
 
-    startUserSession(
-      {
-        ...pendingUser,
-        ...savedProfile,
-        phone: pendingUser.phone,
+    window.history.replaceState({}, "", window.location.pathname);
+
+    fetch(`${API_BASE_URL}/auth/me`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
       },
-      pendingUser.rememberMe,
-    );
-  };
+    })
+      .then(async (response) => {
+        const payload = await parseApiPayload(response);
+        if (!response.ok) {
+          throw new Error(payload.message || "Google sign-in failed.");
+        }
+
+        const user = payload?.user || {};
+        return handleAuthSuccess({
+          ...user,
+          accessToken,
+          rememberMe: true,
+        });
+      })
+      .catch((error) => {
+        console.error(error);
+      });
+  }, [currentUser]);
 
   const handleProfileSave = async (updates) => {
-    if (!currentUser?.phone) {
-      return;
+    if (!currentUser?.accessToken) {
+      throw new Error("Auth session missing. Please sign in again.");
     }
 
     const savedProfile = await saveProfile({
-      phone: currentUser.phone,
+      phone: updates?.phone || currentUser.phone || "",
+      email: updates?.email || currentUser.email || "",
       name: updates?.name || currentUser.name || "User",
       image: updates?.image || "",
       statusText: updates?.statusText || "",
@@ -250,7 +256,6 @@ const App = () => {
     const nextUser = {
       ...currentUser,
       ...savedProfile,
-      phone: currentUser.phone,
     };
 
     setCurrentUser(nextUser);
@@ -271,13 +276,6 @@ const App = () => {
           currentUser={currentUser}
           onLogout={handleLogout}
           onProfileSave={handleProfileSave}
-        />
-      ) : pendingUser ? (
-        <ProfileOnboarding
-          phone={pendingUser.phone}
-          initialName={pendingUser.name}
-          onComplete={handleOnboardingComplete}
-          onSkip={handleOnboardingSkip}
         />
       ) : (
         <Auth onAuthSuccess={handleAuthSuccess} />

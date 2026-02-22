@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-function ProfileOnboarding({ phone, initialName, onComplete, onSkip }) {
+function ProfileOnboarding({ contactValue, initialName, onComplete, onSkip }) {
   const [name, setName] = useState(
     initialName && initialName !== "User" ? initialName : "",
   );
@@ -71,7 +71,11 @@ function ProfileOnboarding({ phone, initialName, onComplete, onSkip }) {
           <p className="mt-1 text-left text-sm text-white/70">
             Add your name and photo before entering chat, or skip for now.
           </p>
-          <p className="mt-2 text-left text-xs text-white/60">{phone}</p>
+          {contactValue && (
+            <p className="mt-2 text-left text-xs text-white/60">
+              {contactValue}
+            </p>
+          )}
         </div>
 
         <form className="space-y-3" onSubmit={handleContinue}>

@@ -2,6 +2,8 @@ import UserActions from "./UserActions";
 
 function ProfileSummaryCard({ profile, onProfile, onSettings }) {
   const profileInitial = profile.name?.trim()?.charAt(0)?.toUpperCase() || "U";
+  const profileSubtitle =
+    profile.statusText?.trim() || profile.email || "No bio yet";
 
   return (
     <div className="mb-4 flex items-center justify-between rounded-2xl border border-white/15 bg-black/20 p-2.5">
@@ -21,7 +23,7 @@ function ProfileSummaryCard({ profile, onProfile, onSettings }) {
           <p className="truncate text-sm font-semibold text-white/95">
             {profile.name}
           </p>
-          <p className="truncate text-xs text-white/65">{profile.phone}</p>
+          <p className="truncate text-xs text-white/65">{profileSubtitle}</p>
         </div>
       </div>
 
