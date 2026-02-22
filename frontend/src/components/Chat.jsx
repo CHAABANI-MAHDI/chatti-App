@@ -5,9 +5,8 @@ import List from "./List";
 import ProfileModal from "./modals/ProfileModal";
 import SettingsModal from "./modals/SettingsModal";
 import UserActions from "./shared/UserActions";
+import { API_BASE_URL } from "../lib/apiBaseUrl";
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
 const POLL_INTERVAL_MS = 5000;
 
 const parseApiPayload = async (response) => {

@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
 import Auth from "./components/Auth";
 import Chat from "./components/Chat";
+import { API_BASE_URL } from "./lib/apiBaseUrl";
 
 const PERSISTENT_SESSION_KEY = "chat-firebase-app-session-persistent";
 const TAB_SESSION_KEY = "chat-firebase-app-session-tab";
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
 const PERSISTENT_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const TAB_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 

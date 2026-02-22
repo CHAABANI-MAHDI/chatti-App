@@ -4,7 +4,7 @@ const { createClient } = require("@supabase/supabase-js");
 dotenv.config();
 
 const buildContext = () => {
-  const port = process.env.PORT || 5000;
+  const port = process.env.PORT || 5001;
   const profilesTable = process.env.PROFILES_TABLE || "profiles";
   const messagesTable = process.env.MESSAGES_TABLE || "messages";
   const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || "Chatti - App";

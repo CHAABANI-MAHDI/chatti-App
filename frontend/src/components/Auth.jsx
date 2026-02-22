@@ -1,7 +1,5 @@
 import { useState } from "react";
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
+import { API_BASE_URL } from "../lib/apiBaseUrl";
 
 function Auth({ onAuthSuccess }) {
   const [authMode, setAuthMode] = useState("signin");
