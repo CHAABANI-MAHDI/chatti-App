@@ -50,7 +50,11 @@ const buildContext = () => {
   let messageImageColumnCache = String(process.env.MESSAGE_IMAGE_COLUMN || "")
     .trim()
     .toLowerCase();
+  let messageAudioColumnCache = String(process.env.MESSAGE_AUDIO_COLUMN || "")
+    .trim()
+    .toLowerCase();
   const inlineImageMessagePrefix = "__relatime_image__:";
+  const inlineAudioMessagePrefix = "__relatime_audio__:";
 
   const getBearerToken = (req) => {
     const rawHeader = String(req.headers?.authorization || "").trim();
@@ -344,13 +348,46 @@ const buildContext = () => {
   const parseImageDataUrl = (value = "") => {
     const match = String(value)
       .trim()
-      .match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+      .match(/^data:(image\/[a-zA-Z0-9.+-]+(?:;[^;,]+)*);base64,(.+)$/i);
 
     if (!match) {
       return null;
     }
 
-    const mimeType = match[1].toLowerCase();
+    const mimeType = String(match[1] || "")
+      .toLowerCase()
+      .split(";")[0]
+      .trim();
+    const base64Body = match[2];
+
+    try {
+      const buffer = Buffer.from(base64Body, "base64");
+      if (!buffer.length) {
+        return null;
+      }
+
+      return {
+        mimeType,
+        buffer,
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const parseAudioDataUrl = (value = "") => {
+    const match = String(value)
+      .trim()
+      .match(/^data:(audio\/[a-zA-Z0-9.+-]+(?:;[^;,]+)*);base64,(.+)$/i);
+
+    if (!match) {
+      return null;
+    }
+
+    const mimeType = String(match[1] || "")
+      .toLowerCase()
+      .split(";")[0]
+      .trim();
     const base64Body = match[2];
 
     try {
@@ -379,6 +416,21 @@ const buildContext = () => {
     };
 
     return map[mimeType] || "jpg";
+  };
+
+  const audioExtensionFromMime = (mimeType = "") => {
+    const map = {
+      "audio/webm": "webm",
+      "audio/mp4": "m4a",
+      "audio/mpeg": "mp3",
+      "audio/mp3": "mp3",
+      "audio/ogg": "ogg",
+      "audio/wav": "wav",
+      "audio/x-wav": "wav",
+      "audio/aac": "aac",
+    };
+
+    return map[mimeType] || "webm";
   };
 
   const encodeInlineImageMessageBody = (text = "", imagePath = "") => {
@@ -413,6 +465,42 @@ const buildContext = () => {
 
     return {
       imagePath: payload.slice(0, newlineIndex).trim(),
+      text: payload.slice(newlineIndex + 1),
+    };
+  };
+
+  const encodeInlineAudioMessageBody = (text = "", audioPath = "") => {
+    const normalizedText = String(text || "").trim();
+    const normalizedAudioPath = String(audioPath || "").trim();
+
+    if (!normalizedAudioPath) {
+      return normalizedText;
+    }
+
+    return `${inlineAudioMessagePrefix}${normalizedAudioPath}\n${normalizedText}`;
+  };
+
+  const decodeInlineAudioMessageBody = (rawBody = "") => {
+    const bodyValue = String(rawBody || "");
+    if (!bodyValue.startsWith(inlineAudioMessagePrefix)) {
+      return {
+        text: bodyValue,
+        audioPath: "",
+      };
+    }
+
+    const payload = bodyValue.slice(inlineAudioMessagePrefix.length);
+    const newlineIndex = payload.indexOf("\n");
+
+    if (newlineIndex < 0) {
+      return {
+        text: "",
+        audioPath: payload.trim(),
+      };
+    }
+
+    return {
+      audioPath: payload.slice(0, newlineIndex).trim(),
       text: payload.slice(newlineIndex + 1),
     };
   };
@@ -608,13 +696,16 @@ const buildContext = () => {
     if (
       messageSenderColumnCache &&
       messageBodyColumnCache &&
-      messageImageColumnCache !== ""
+      messageImageColumnCache !== "" &&
+      messageAudioColumnCache !== ""
     ) {
       return {
         senderColumn: messageSenderColumnCache,
         bodyColumn: messageBodyColumnCache,
         imageColumn:
           messageImageColumnCache === "__none__" ? "" : messageImageColumnCache,
+        audioColumn:
+          messageAudioColumnCache === "__none__" ? "" : messageAudioColumnCache,
       };
     }
 
@@ -625,6 +716,7 @@ const buildContext = () => {
         senderColumn: "sender_id",
         bodyColumn: "body",
         imageColumn: "",
+        audioColumn: "",
       };
     }
 
@@ -671,11 +763,30 @@ const buildContext = () => {
       }
     }
 
+    if (messageAudioColumnCache === "") {
+      for (const candidate of ["audio_url", "voice_url", "audio_path"]) {
+        const { error } = await safeClient
+          .from(messagesTable)
+          .select(candidate)
+          .limit(1);
+        if (!error) {
+          messageAudioColumnCache = candidate;
+          break;
+        }
+      }
+
+      if (!messageAudioColumnCache) {
+        messageAudioColumnCache = "__none__";
+      }
+    }
+
     return {
       senderColumn: messageSenderColumnCache || "sender_id",
       bodyColumn: messageBodyColumnCache || "body",
       imageColumn:
         messageImageColumnCache === "__none__" ? "" : messageImageColumnCache,
+      audioColumn:
+        messageAudioColumnCache === "__none__" ? "" : messageAudioColumnCache,
     };
   };
 
@@ -719,9 +830,13 @@ const buildContext = () => {
     mapContactPreview,
     mapAuthUserForClient,
     parseImageDataUrl,
+    parseAudioDataUrl,
     extensionFromMime,
+    audioExtensionFromMime,
     encodeInlineImageMessageBody,
     decodeInlineImageMessageBody,
+    encodeInlineAudioMessageBody,
+    decodeInlineAudioMessageBody,
     resolveRequesterId,
     resolveAuthenticatedUser,
     resolveOwnerProfile,

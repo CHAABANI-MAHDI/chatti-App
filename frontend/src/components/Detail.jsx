@@ -11,11 +11,17 @@ function Detail({
   const [messageText, setMessageText] = useState("");
   const [pendingImageDataUrl, setPendingImageDataUrl] = useState("");
   const [pendingImageName, setPendingImageName] = useState("");
+  const [pendingAudioDataUrl, setPendingAudioDataUrl] = useState("");
+  const [pendingAudioName, setPendingAudioName] = useState("");
+  const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   const [newMessageCount, setNewMessageCount] = useState(0);
   const messagesContainerRef = useRef(null);
   const inputRef = useRef(null);
   const imageInputRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const recordingChunksRef = useRef([]);
+  const recordingStreamRef = useRef(null);
   const shouldAutoScrollRef = useRef(true);
   const lastHandledMessageKeyRef = useRef("");
 
@@ -28,6 +34,9 @@ function Detail({
     setMessageText("");
     setPendingImageDataUrl("");
     setPendingImageName("");
+    setPendingAudioDataUrl("");
+    setPendingAudioName("");
+    setIsRecordingAudio(false);
     setIsEmojiPickerOpen(false);
     setNewMessageCount(0);
     shouldAutoScrollRef.current = true;
@@ -56,7 +65,7 @@ function Detail({
     const node = messagesContainerRef.current;
     if (!node) return;
 
-    const nextKey = `${lastMessage.id || ""}:${lastMessage.timestamp || ""}:${lastMessage.text || ""}:${lastMessage.imageUrl || ""}:${lastMessage.fromMe ? "1" : "0"}`;
+    const nextKey = `${lastMessage.id || ""}:${lastMessage.timestamp || ""}:${lastMessage.text || ""}:${lastMessage.imageUrl || ""}:${lastMessage.audioUrl || ""}:${lastMessage.fromMe ? "1" : "0"}`;
     if (lastHandledMessageKeyRef.current === nextKey) return;
     lastHandledMessageKeyRef.current = nextKey;
 
@@ -75,12 +84,30 @@ function Detail({
     }
   }, [chat?.id, lastMessage]);
 
+  useEffect(() => {
+    return () => {
+      if (mediaRecorderRef.current?.state === "recording") {
+        mediaRecorderRef.current.stop();
+      }
+
+      if (recordingStreamRef.current) {
+        recordingStreamRef.current.getTracks().forEach((track) => track.stop());
+        recordingStreamRef.current = null;
+      }
+    };
+  }, []);
+
   const clearPendingImage = () => {
     setPendingImageDataUrl("");
     setPendingImageName("");
     if (imageInputRef.current) {
       imageInputRef.current.value = "";
     }
+  };
+
+  const clearPendingAudio = () => {
+    setPendingAudioDataUrl("");
+    setPendingAudioName("");
   };
 
   const handlePickImage = (event) => {
@@ -117,16 +144,105 @@ function Detail({
     setMessageText((prev) => `${prev}${emojiData.emoji}`);
   };
 
+  const stopAudioRecording = () => {
+    if (mediaRecorderRef.current?.state === "recording") {
+      mediaRecorderRef.current.stop();
+    }
+  };
+
+  const startAudioRecording = async () => {
+    if (isRecordingAudio || sendingMessage) return;
+    if (
+      !navigator.mediaDevices?.getUserMedia ||
+      typeof MediaRecorder === "undefined"
+    ) {
+      alert("Voice recording is not supported in this browser.");
+      return;
+    }
+
+    try {
+      clearPendingAudio();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recordingStreamRef.current = stream;
+      const recorder = new MediaRecorder(stream);
+      recordingChunksRef.current = [];
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          recordingChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const chunks = recordingChunksRef.current || [];
+        recordingChunksRef.current = [];
+
+        if (recordingStreamRef.current) {
+          recordingStreamRef.current
+            .getTracks()
+            .forEach((track) => track.stop());
+          recordingStreamRef.current = null;
+        }
+
+        if (!chunks.length) {
+          setIsRecordingAudio(false);
+          return;
+        }
+
+        const blob = new Blob(chunks, {
+          type: recorder.mimeType || "audio/webm",
+        });
+
+        if (blob.size > 10 * 1024 * 1024) {
+          alert("Audio is too large. Max allowed size is 10MB.");
+          setIsRecordingAudio(false);
+          return;
+        }
+
+        const fileReader = new FileReader();
+        fileReader.onload = () => {
+          setPendingAudioDataUrl(
+            typeof fileReader.result === "string" ? fileReader.result : "",
+          );
+          setPendingAudioName(
+            `Voice message (${Math.ceil(blob.size / 1024)} KB)`,
+          );
+          setIsRecordingAudio(false);
+        };
+        fileReader.readAsDataURL(blob);
+      };
+
+      recorder.start();
+      setIsRecordingAudio(true);
+      setIsEmojiPickerOpen(false);
+    } catch (error) {
+      alert(error?.message || "Microphone access denied.");
+      setIsRecordingAudio(false);
+      if (recordingStreamRef.current) {
+        recordingStreamRef.current.getTracks().forEach((track) => track.stop());
+        recordingStreamRef.current = null;
+      }
+    }
+  };
+
   const handleSend = async () => {
     const text = messageText.trim();
-    if ((!text && !pendingImageDataUrl) || !chat || sendingMessage) return;
+    if (
+      (!text && !pendingImageDataUrl && !pendingAudioDataUrl) ||
+      !chat ||
+      sendingMessage
+    )
+      return;
     try {
       await onSendMessage?.(chat, {
         text,
         imageDataUrl: pendingImageDataUrl,
+        audioDataUrl: pendingAudioDataUrl,
       });
       setMessageText("");
       clearPendingImage();
+      clearPendingAudio();
       setIsEmojiPickerOpen(false);
       window.requestAnimationFrame(() => {
         inputRef.current?.focus();
@@ -220,6 +336,18 @@ function Detail({
                   <p className={message.imageUrl ? "mt-2" : ""}>
                     {message.text}
                   </p>
+                ) : null}
+                {message.audioUrl ? (
+                  <audio
+                    controls
+                    preload="none"
+                    src={message.audioUrl}
+                    className={
+                      message.text || message.imageUrl
+                        ? "mt-2 w-full min-w-[220px]"
+                        : "w-full min-w-[220px]"
+                    }
+                  />
                 ) : null}
                 <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-white/65">
                   {!message.fromMe && !message.read && (
@@ -350,8 +478,13 @@ function Detail({
 
         <button
           type="button"
-          title="Send voice message"
-          className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/20 bg-white/10 text-white/90 transition-colors hover:bg-white/15 md:flex"
+          title={isRecordingAudio ? "Stop recording" : "Record voice message"}
+          onClick={isRecordingAudio ? stopAudioRecording : startAudioRecording}
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border text-white/90 transition-colors ${
+            isRecordingAudio
+              ? "border-rose-300/60 bg-rose-300/20 hover:bg-rose-300/25"
+              : "border-white/20 bg-white/10 hover:bg-white/15"
+          }`}
         >
           <svg
             className="h-4 w-4"
@@ -456,6 +589,52 @@ function Detail({
               Remove
             </button>
           </div>
+        </div>
+      ) : null}
+
+      {pendingAudioDataUrl ? (
+        <div className="mt-2 rounded-xl border border-white/20 bg-black/25 p-2">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full border border-white/25 bg-white/10 text-white/85">
+              <svg
+                className="h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.8}
+                  d="M12 5a2.5 2.5 0 00-2.5 2.5v4a2.5 2.5 0 005 0v-4A2.5 2.5 0 0012 5zm-5 6.5a5 5 0 0010 0M12 17v3m-3 0h6"
+                />
+              </svg>
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs text-white/85">
+                {pendingAudioName || "Voice message"}
+              </p>
+              <audio
+                controls
+                preload="none"
+                src={pendingAudioDataUrl}
+                className="mt-1 w-full"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={clearPendingAudio}
+              className="rounded-md border border-white/25 bg-white/10 px-2 py-1 text-[11px] text-white/85 hover:bg-white/15"
+            >
+              Remove
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {isRecordingAudio ? (
+        <div className="mt-2 rounded-xl border border-rose-300/35 bg-rose-300/10 px-3 py-2 text-xs text-rose-100">
+          Recording voice... tap mic again to stop.
         </div>
       ) : null}
 

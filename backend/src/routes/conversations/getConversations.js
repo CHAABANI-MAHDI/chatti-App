@@ -155,6 +155,7 @@ const registerGetConversationsRoute = (app, ctx) => {
       messageColumns.bodyColumn,
       "created_at",
       ...(messageColumns.imageColumn ? [messageColumns.imageColumn] : []),
+      ...(messageColumns.audioColumn ? [messageColumns.audioColumn] : []),
     ];
 
     const { data: messageRows, error: messagesError } = await profileClient
@@ -213,17 +214,31 @@ const registerGetConversationsRoute = (app, ctx) => {
           const latestBody = String(
             latestMessage?.[messageColumns.bodyColumn] || "",
           );
-          const decodedBody = ctx.decodeInlineImageMessageBody(latestBody);
+          const decodedImageBody = ctx.decodeInlineImageMessageBody(latestBody);
+          const decodedAudioBody = ctx.decodeInlineAudioMessageBody(
+            String(decodedImageBody.text || ""),
+          );
           const latestImagePath = messageColumns.imageColumn
             ? String(latestMessage?.[messageColumns.imageColumn] || "").trim()
-            : decodedBody.imagePath;
+            : decodedImageBody.imagePath;
+          const latestAudioPath = messageColumns.audioColumn
+            ? String(latestMessage?.[messageColumns.audioColumn] || "").trim()
+            : decodedAudioBody.audioPath;
           const latestText = messageColumns.imageColumn
             ? latestBody
-            : decodedBody.text;
+            : messageColumns.audioColumn
+              ? latestBody
+              : decodedAudioBody.text;
 
           return {
             ...baseProfile,
-            lastMessage: latestText || (latestImagePath ? "📷 Photo" : ""),
+            lastMessage:
+              latestText ||
+              (latestImagePath
+                ? "📷 Photo"
+                : latestAudioPath
+                  ? "🎤 Voice message"
+                  : ""),
             lastMessageAt: latestMessage?.created_at || null,
             lastMessageFromMe:
               latestMessage?.[messageColumns.senderColumn] ===

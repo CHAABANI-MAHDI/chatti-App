@@ -139,6 +139,7 @@ const registerGetMessagesRoute = (app, ctx) => {
       messageColumns.bodyColumn,
       "created_at",
       ...(messageColumns.imageColumn ? [messageColumns.imageColumn] : []),
+      ...(messageColumns.audioColumn ? [messageColumns.audioColumn] : []),
     ];
 
     const { data, error } = await profileClient
@@ -155,6 +156,7 @@ const registerGetMessagesRoute = (app, ctx) => {
     }
 
     const imageUrlCache = new Map();
+    const audioUrlCache = new Map();
     const resolveImageUrl = async (imagePath = "") => {
       const normalizedPath = String(imagePath || "").trim();
       if (!normalizedPath) {
@@ -173,20 +175,49 @@ const registerGetMessagesRoute = (app, ctx) => {
       return resolved || "";
     };
 
+    const resolveAudioUrl = async (audioPath = "") => {
+      const normalizedPath = String(audioPath || "").trim();
+      if (!normalizedPath) {
+        return "";
+      }
+
+      if (audioUrlCache.has(normalizedPath)) {
+        return audioUrlCache.get(normalizedPath);
+      }
+
+      const resolved = await ctx.resolveAvatarForClient(
+        normalizedPath,
+        ctx.supabaseServiceClient || profileClient,
+      );
+      audioUrlCache.set(normalizedPath, resolved || "");
+      return resolved || "";
+    };
+
     const mappedMessages = await Promise.all(
       (data || []).map(async (row) => {
         const rawBody = String(row?.[messageColumns.bodyColumn] || "");
-        const decodedBody = ctx.decodeInlineImageMessageBody(rawBody);
+        const decodedImageBody = ctx.decodeInlineImageMessageBody(rawBody);
+        const decodedAudioBody = ctx.decodeInlineAudioMessageBody(
+          String(decodedImageBody.text || ""),
+        );
         const imagePath = messageColumns.imageColumn
           ? String(row?.[messageColumns.imageColumn] || "").trim()
-          : decodedBody.imagePath;
+          : decodedImageBody.imagePath;
+        const audioPath = messageColumns.audioColumn
+          ? String(row?.[messageColumns.audioColumn] || "").trim()
+          : decodedAudioBody.audioPath;
         const imageUrl = await resolveImageUrl(imagePath);
-        const text = messageColumns.imageColumn ? rawBody : decodedBody.text;
+        const audioUrl = await resolveAudioUrl(audioPath);
+        const text =
+          messageColumns.imageColumn || messageColumns.audioColumn
+            ? rawBody
+            : decodedAudioBody.text;
 
         return {
           id: row.id || null,
           text,
           imageUrl,
+          audioUrl,
           timestamp: row.created_at || null,
           fromMe: row[messageColumns.senderColumn] === ownerMessageSenderValue,
           senderPhone:

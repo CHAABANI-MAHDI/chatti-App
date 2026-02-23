@@ -17,6 +17,7 @@ const registerPostMessageRoute = (app, ctx) => {
     const rawReceiverId = String(req.body?.receiverId || "").trim();
     const body = String(req.body?.text || "").trim();
     const rawImageDataUrl = String(req.body?.imageDataUrl || "").trim();
+    const rawAudioDataUrl = String(req.body?.audioDataUrl || "").trim();
 
     const hasSenderId = isUuid(rawSenderId);
     const hasReceiverId = isUuid(rawReceiverId);
@@ -33,9 +34,9 @@ const registerPostMessageRoute = (app, ctx) => {
       });
     }
 
-    if (!body && !rawImageDataUrl) {
+    if (!body && !rawImageDataUrl && !rawAudioDataUrl) {
       return res.status(400).json({
-        message: "Message text or image is required.",
+        message: "Message text, image, or audio is required.",
       });
     }
 
@@ -274,10 +275,19 @@ const registerPostMessageRoute = (app, ctx) => {
     const parsedImage = rawImageDataUrl
       ? ctx.parseImageDataUrl(rawImageDataUrl)
       : null;
+    const parsedAudio = rawAudioDataUrl
+      ? ctx.parseAudioDataUrl(rawAudioDataUrl)
+      : null;
 
     if (rawImageDataUrl && !parsedImage) {
       return res.status(400).json({
         message: "Invalid image payload. Expected a valid image data URL.",
+      });
+    }
+
+    if (rawAudioDataUrl && !parsedAudio) {
+      return res.status(400).json({
+        message: "Invalid audio payload. Expected a valid audio data URL.",
       });
     }
 
@@ -287,7 +297,14 @@ const registerPostMessageRoute = (app, ctx) => {
       });
     }
 
+    if (parsedAudio && parsedAudio.buffer.length > 10 * 1024 * 1024) {
+      return res.status(400).json({
+        message: "Audio is too large. Max allowed size is 10MB.",
+      });
+    }
+
     let storedImagePath = "";
+    let storedAudioPath = "";
 
     if (parsedImage) {
       const fileExtension = ctx.extensionFromMime(parsedImage.mimeType);
@@ -311,9 +328,43 @@ const registerPostMessageRoute = (app, ctx) => {
       storedImagePath = filePath;
     }
 
-    const storedBody = messageColumns.imageColumn
-      ? body
-      : ctx.encodeInlineImageMessageBody(body, storedImagePath);
+    if (parsedAudio) {
+      const fileExtension = ctx.audioExtensionFromMime(parsedAudio.mimeType);
+      const filePath = `${senderProfileId}/messages/${conversationId}/${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 10)}.${fileExtension}`;
+
+      const { error: uploadError } = await profileWriteClient.storage
+        .from(ctx.storageBucket)
+        .upload(filePath, parsedAudio.buffer, {
+          contentType: parsedAudio.mimeType,
+          upsert: false,
+        });
+
+      if (uploadError) {
+        return res.status(500).json({
+          message: uploadError.message || "Failed to upload audio.",
+        });
+      }
+
+      storedAudioPath = filePath;
+    }
+
+    let storedBody = body;
+
+    if (!messageColumns.imageColumn) {
+      storedBody = ctx.encodeInlineImageMessageBody(
+        storedBody,
+        storedImagePath,
+      );
+    }
+
+    if (!messageColumns.audioColumn) {
+      storedBody = ctx.encodeInlineAudioMessageBody(
+        storedBody,
+        storedAudioPath,
+      );
+    }
 
     const insertPayload = {
       conversation_id: conversationId,
@@ -325,6 +376,10 @@ const registerPostMessageRoute = (app, ctx) => {
       insertPayload[messageColumns.imageColumn] = storedImagePath || null;
     }
 
+    if (messageColumns.audioColumn) {
+      insertPayload[messageColumns.audioColumn] = storedAudioPath || null;
+    }
+
     const selectedColumns = [
       "id",
       messageColumns.senderColumn,
@@ -332,6 +387,7 @@ const registerPostMessageRoute = (app, ctx) => {
       messageColumns.bodyColumn,
       "created_at",
       ...(messageColumns.imageColumn ? [messageColumns.imageColumn] : []),
+      ...(messageColumns.audioColumn ? [messageColumns.audioColumn] : []),
     ];
 
     const { data, error } = await profileClient
@@ -346,24 +402,35 @@ const registerPostMessageRoute = (app, ctx) => {
       });
     }
 
-    const decodedBody = ctx.decodeInlineImageMessageBody(
+    const decodedImageBody = ctx.decodeInlineImageMessageBody(
       String(data?.[messageColumns.bodyColumn] || ""),
+    );
+    const decodedAudioBody = ctx.decodeInlineAudioMessageBody(
+      String(decodedImageBody.text || ""),
     );
     const resolvedImagePath = messageColumns.imageColumn
       ? String(data?.[messageColumns.imageColumn] || "").trim()
-      : decodedBody.imagePath;
+      : decodedImageBody.imagePath;
+    const resolvedAudioPath = messageColumns.audioColumn
+      ? String(data?.[messageColumns.audioColumn] || "").trim()
+      : decodedAudioBody.audioPath;
     const resolvedImageUrl = resolvedImagePath
       ? await ctx.resolveAvatarForClient(resolvedImagePath, profileWriteClient)
       : "";
-    const resolvedText = messageColumns.imageColumn
-      ? String(data?.[messageColumns.bodyColumn] || "")
-      : decodedBody.text;
+    const resolvedAudioUrl = resolvedAudioPath
+      ? await ctx.resolveAvatarForClient(resolvedAudioPath, profileWriteClient)
+      : "";
+    const resolvedText =
+      messageColumns.imageColumn || messageColumns.audioColumn
+        ? String(data?.[messageColumns.bodyColumn] || "")
+        : decodedAudioBody.text;
 
     if (typeof ctx.emitMessageCreated === "function") {
       ctx.emitMessageCreated({
         id: data?.id || null,
         text: resolvedText,
         imageUrl: resolvedImageUrl,
+        audioUrl: resolvedAudioUrl,
         timestamp: data?.created_at || null,
         senderId: senderProfileId,
         receiverId: receiverProfileId,
@@ -376,6 +443,7 @@ const registerPostMessageRoute = (app, ctx) => {
         id: data?.id || null,
         text: resolvedText,
         imageUrl: resolvedImageUrl,
+        audioUrl: resolvedAudioUrl,
         timestamp: data?.created_at || null,
         fromMe: true,
         senderPhone: ctx.formatPhoneFromDb(senderPhoneFromDb),

@@ -51,8 +51,9 @@ const buildMessageFingerprint = (message = {}) => {
   ).trim();
   const text = String(message.text || "").trim();
   const imageUrl = String(message.imageUrl || "").trim();
+  const audioUrl = String(message.audioUrl || "").trim();
   const fromMe = message.fromMe ? "1" : "0";
-  return `fallback:${ts}:${fromMe}:${text}:${imageUrl}`;
+  return `fallback:${ts}:${fromMe}:${text}:${imageUrl}:${audioUrl}`;
 };
 
 const normalizeOutgoingMessageInput = (payload) => {
@@ -60,13 +61,26 @@ const normalizeOutgoingMessageInput = (payload) => {
     return {
       text: payload,
       imageDataUrl: "",
+      audioDataUrl: "",
     };
   }
 
   return {
     text: String(payload?.text || ""),
     imageDataUrl: String(payload?.imageDataUrl || ""),
+    audioDataUrl: String(payload?.audioDataUrl || ""),
   };
+};
+
+const buildLastMessagePreview = (payload = {}) => {
+  const text = String(payload.text || "").trim();
+  const imageUrl = String(payload.imageUrl || "").trim();
+  const audioUrl = String(payload.audioUrl || "").trim();
+
+  if (text) return text;
+  if (imageUrl) return "📷 Photo";
+  if (audioUrl) return "🎤 Voice message";
+  return "";
 };
 
 const isAuthExpiredMessage = (message = "") =>
@@ -419,6 +433,7 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
             id: event.id || null,
             text: String(event.text || ""),
             imageUrl: String(event.imageUrl || ""),
+            audioUrl: String(event.audioUrl || ""),
             timestamp: formatTime(incomingTimestamp),
             createdAt: incomingTimestamp,
             fromMe: isFromMe,
@@ -442,9 +457,7 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
 
           return {
             ...chat,
-            lastMessage:
-              String(event.text || "") ||
-              (String(event.imageUrl || "") ? "📷 Photo" : ""),
+            lastMessage: buildLastMessagePreview(event),
             lastMessageFromMe: isFromMe,
             lastMessageAt: incomingTimestamp,
             time: formatTime(incomingTimestamp),
@@ -476,11 +489,14 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
           chatsRef.current.find((c) => c.id === contactId)?.name ||
           "New message";
         new Notification(label, {
-          body:
-            String(event.text || "") ||
-            (String(event.imageUrl || "")
-              ? "📷 You received a photo."
-              : "You received a new message."),
+          body: (() => {
+            const text = String(event.text || "");
+            if (text) return text;
+            if (String(event.imageUrl || "")) return "📷 You received a photo.";
+            if (String(event.audioUrl || ""))
+              return "🎤 You received a voice message.";
+            return "You received a new message.";
+          })(),
         });
       }
     };
@@ -610,10 +626,11 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
     if (!chat?.id || !effectiveUserId) return;
     if (isSendingMessageRef.current) return;
 
-    const { text, imageDataUrl } = normalizeOutgoingMessageInput(inputPayload);
+    const { text, imageDataUrl, audioDataUrl } =
+      normalizeOutgoingMessageInput(inputPayload);
     const normalizedText = String(text || "").trim();
 
-    if (!normalizedText && !imageDataUrl) return;
+    if (!normalizedText && !imageDataUrl && !audioDataUrl) return;
 
     isSendingMessageRef.current = true;
     setSendingMessage(true);
@@ -631,6 +648,7 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
           receiverId: chat.id,
           text: normalizedText,
           imageDataUrl,
+          audioDataUrl,
         }),
       });
 
@@ -659,9 +677,11 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
           );
           return {
             ...item,
-            lastMessage:
-              normalizedText ||
-              (String(nextMessage.imageUrl || "") ? "📷 Photo" : ""),
+            lastMessage: buildLastMessagePreview({
+              text: normalizedText,
+              imageUrl: nextMessage.imageUrl,
+              audioUrl: nextMessage.audioUrl,
+            }),
             lastMessageFromMe: true,
             lastMessageAt:
               payload.message?.timestamp || new Date().toISOString(),
