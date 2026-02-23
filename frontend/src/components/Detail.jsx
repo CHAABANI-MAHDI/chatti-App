@@ -391,7 +391,6 @@ function Detail({
         {[
           { label: "Phone", value: chat.phone ?? "+1 000 000 0000" },
           { label: "Role", value: chat.role ?? "Team member" },
-          { label: "Timezone", value: chat.timezone ?? "UTC" },
           { label: "Status", value: chat.lastSeen },
         ].map(({ label, value }) => (
           <div
