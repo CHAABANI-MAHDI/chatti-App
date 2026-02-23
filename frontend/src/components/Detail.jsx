@@ -215,7 +215,7 @@ function Detail({
     return () => window.cancelAnimationFrame(frame);
   }, [chat?.id]);
 
-  // Handle new messages — scroll or show badge
+  // Handle new messages — always scroll to latest (sent and received)
   useEffect(() => {
     if (!chat?.id || !lastMessage) return;
     const node = messagesContainerRef.current;
@@ -225,19 +225,12 @@ function Detail({
     if (lastHandledMessageKeyRef.current === nextKey) return;
     lastHandledMessageKeyRef.current = nextKey;
 
-    const shouldStick =
-      shouldAutoScrollRef.current || Boolean(lastMessage.fromMe);
-    if (shouldStick) {
-      const frame = window.requestAnimationFrame(() => {
-        node.scrollTop = node.scrollHeight;
-      });
-      setNewMessageCount(0);
-      return () => window.cancelAnimationFrame(frame);
-    }
-
-    if (!lastMessage.fromMe) {
-      setNewMessageCount((prev) => prev + 1);
-    }
+    const frame = window.requestAnimationFrame(() => {
+      node.scrollTop = node.scrollHeight;
+    });
+    setNewMessageCount(0);
+    shouldAutoScrollRef.current = true;
+    return () => window.cancelAnimationFrame(frame);
   }, [chat?.id, lastMessage]);
 
   useEffect(() => {
@@ -952,7 +945,6 @@ function Detail({
                 {chat.name}
               </h2>
               <div className="mt-0.5 flex flex-wrap items-center gap-2 text-sm text-white/70">
-                <span>{chat.lastSeen}</span>
                 <span
                   className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide ${connectionTone}`}
                 >
