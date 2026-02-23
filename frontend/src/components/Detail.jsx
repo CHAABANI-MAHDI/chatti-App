@@ -719,26 +719,6 @@ function Detail({
 
         <button
           type="button"
-          title="Open camera"
-          className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/20 bg-white/10 text-white/90 transition-colors hover:bg-white/15 md:flex"
-        >
-          <svg
-            className="h-4 w-4"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.8}
-              d="M15 10l4.2-2.1A1 1 0 0121 8.8v6.4a1 1 0 01-1.8.9L15 14m-9 4h8a2 2 0 002-2V8a2 2 0 00-2-2H6a2 2 0 00-2 2v8a2 2 0 002 2z"
-            />
-          </svg>
-        </button>
-
-        <button
-          type="button"
           title={isRecordingAudio ? "Stop recording" : "Record voice message"}
           onClick={isRecordingAudio ? stopAudioRecording : startAudioRecording}
           className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border text-white/90 transition-colors ${
@@ -982,12 +962,6 @@ function Detail({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <button
-              type="button"
-              className="rounded-md border border-white/20 bg-white/10 px-2 py-1 text-xs text-white/90"
-            >
-              Call
-            </button>
             <button
               type="button"
               onClick={toggleInfoPanel}
