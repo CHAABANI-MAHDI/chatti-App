@@ -1,5 +1,10 @@
 const registerGetProfileByPhoneRoute = (app, ctx) => {
-  app.get("/profile/:phone", async (req, res) => {
+  app.get("/profile/:identifier", async (req, res) => {
+    const isUuid = (value = "") =>
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        String(value || "").trim(),
+      );
+
     const profileClient = ctx.getProfileClient(req);
     if (!profileClient) {
       return res.status(500).json({
@@ -8,21 +13,30 @@ const registerGetProfileByPhoneRoute = (app, ctx) => {
       });
     }
 
-    const rawPhone = ctx.normalizePhone(String(req.params?.phone || ""));
+    const rawIdentifier = String(req.params?.identifier || "").trim();
+    const normalizedEmail = ctx.normalizeEmail(rawIdentifier);
+    const isIdQuery = isUuid(rawIdentifier);
+    const isEmailQuery = ctx.validateEmail(normalizedEmail);
+    const isNameQuery =
+      !isIdQuery && !isEmailQuery && rawIdentifier.length >= 2;
 
-    if (!ctx.validatePhoneForProfile(rawPhone)) {
+    if (!isIdQuery && !isEmailQuery && !isNameQuery) {
       return res.status(400).json({
         message:
-          "Phone must be a valid number with country code (example: +216123456).",
+          "Provide a valid profile id, email, or at least 2 characters of a name.",
       });
     }
 
-    const phoneForDb = ctx.normalizePhoneForDb(rawPhone);
-    const { data, error } = await profileClient
+    const baseQuery = profileClient
       .from(ctx.profilesTable)
-      .select("id, phone, display_name, avatar_url, status_text")
-      .eq("phone", phoneForDb)
+      .select("id, phone, email, display_name, avatar_url, status_text")
       .limit(1);
+
+    const { data, error } = await (isIdQuery
+      ? baseQuery.eq("id", rawIdentifier)
+      : isEmailQuery
+        ? baseQuery.eq("email", normalizedEmail)
+        : baseQuery.ilike("display_name", `%${rawIdentifier}%`));
 
     if (error) {
       if (

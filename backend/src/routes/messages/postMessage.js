@@ -1,5 +1,10 @@
 const registerPostMessageRoute = (app, ctx) => {
   app.post("/messages", async (req, res) => {
+    const isUuid = (value = "") =>
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        String(value || "").trim(),
+      );
+
     const profileClient = ctx.getProfileClient(req);
     if (!profileClient) {
       return res.status(500).json({
@@ -8,37 +13,37 @@ const registerPostMessageRoute = (app, ctx) => {
       });
     }
 
-    const rawSenderPhone = ctx.normalizePhone(req.body?.senderPhone);
-    const rawReceiverPhone = ctx.normalizePhone(req.body?.receiverPhone);
+    const rawSenderId = String(req.body?.senderId || "").trim();
+    const rawReceiverId = String(req.body?.receiverId || "").trim();
     const body = String(req.body?.text || "").trim();
 
-    if (!ctx.validatePhoneForProfile(rawSenderPhone)) {
-      return res.status(400).json({ message: "senderPhone is invalid." });
+    const hasSenderId = isUuid(rawSenderId);
+    const hasReceiverId = isUuid(rawReceiverId);
+
+    if (!hasSenderId) {
+      return res.status(400).json({
+        message: "senderId must be a valid UUID.",
+      });
     }
 
-    if (!ctx.validatePhoneForProfile(rawReceiverPhone)) {
-      return res.status(400).json({ message: "receiverPhone is invalid." });
+    if (!hasReceiverId) {
+      return res.status(400).json({
+        message: "receiverId must be a valid UUID.",
+      });
     }
 
     if (!body) {
       return res.status(400).json({ message: "Message text is required." });
     }
 
-    const senderPhoneForDb = ctx.normalizePhoneForDb(rawSenderPhone);
-    const receiverPhoneForDb = ctx.normalizePhoneForDb(rawReceiverPhone);
-
-    if (senderPhoneForDb === receiverPhoneForDb) {
+    if (rawSenderId === rawReceiverId) {
       return res.status(400).json({
-        message: "Cannot send message to your own phone.",
+        message: "Cannot send message to yourself.",
       });
     }
 
-    const { data: senderProfiles, error: senderProfileError } =
-      await profileClient
-        .from(ctx.profilesTable)
-        .select("id")
-        .eq("phone", senderPhoneForDb)
-        .limit(1);
+    const { profile: senderProfile, error: senderProfileError } =
+      await ctx.resolveOwnerProfile(req, profileClient, rawSenderId);
 
     if (senderProfileError) {
       return res.status(500).json({
@@ -47,12 +52,13 @@ const registerPostMessageRoute = (app, ctx) => {
       });
     }
 
+    const receiverLookupQuery = profileClient
+      .from(ctx.profilesTable)
+      .select("id, email, phone")
+      .limit(1);
+
     const { data: receiverProfiles, error: receiverProfileError } =
-      await profileClient
-        .from(ctx.profilesTable)
-        .select("id")
-        .eq("phone", receiverPhoneForDb)
-        .limit(1);
+      await receiverLookupQuery.eq("id", rawReceiverId);
 
     if (receiverProfileError) {
       return res.status(500).json({
@@ -61,10 +67,35 @@ const registerPostMessageRoute = (app, ctx) => {
       });
     }
 
-    const senderProfileId = senderProfiles?.[0]?.id || "";
+    const senderProfileId = senderProfile?.id || "";
     const receiverProfileId = receiverProfiles?.[0]?.id || "";
+    const receiverProfile = receiverProfiles?.[0] || null;
+    const senderPhoneFromDb = senderProfile?.phone || "";
+    const receiverPhoneFromDb = receiverProfiles?.[0]?.phone || "";
 
-    if (!senderProfileId || !receiverProfileId) {
+    const memberUserColumn =
+      await ctx.resolveConversationMemberUserColumn(profileClient);
+    const messageColumns = await ctx.resolveMessageColumns(profileClient);
+
+    const senderMemberValue = ctx.resolveConversationMemberValue(
+      senderProfile,
+      memberUserColumn,
+    );
+    const receiverMemberValue = ctx.resolveConversationMemberValue(
+      receiverProfile,
+      memberUserColumn,
+    );
+    const senderMessageSenderValue = ctx.resolveMessageSenderValue(
+      senderProfile,
+      messageColumns.senderColumn,
+    );
+
+    if (
+      !senderProfileId ||
+      !receiverProfileId ||
+      !senderMemberValue ||
+      !receiverMemberValue
+    ) {
       return res.status(404).json({
         message: "Sender or receiver profile was not found.",
       });
@@ -74,7 +105,7 @@ const registerPostMessageRoute = (app, ctx) => {
       await profileClient
         .from("conversation_members")
         .select("conversation_id")
-        .eq("user_id", senderProfileId);
+        .eq(memberUserColumn, senderMemberValue);
 
     if (senderMembershipError) {
       return res.status(500).json({
@@ -99,7 +130,7 @@ const registerPostMessageRoute = (app, ctx) => {
         await profileClient
           .from("conversation_members")
           .select("conversation_id")
-          .eq("user_id", receiverProfileId)
+          .eq(memberUserColumn, receiverMemberValue)
           .in("conversation_id", senderConversationIds)
           .limit(1);
 
@@ -115,15 +146,61 @@ const registerPostMessageRoute = (app, ctx) => {
     }
 
     if (!conversationId) {
-      const { data: createdConversation, error: conversationError } =
-        await profileClient
+      const participantEmails = [
+        ctx.normalizeEmail(senderProfile?.email || ""),
+        ctx.normalizeEmail(receiverProfile?.email || ""),
+      ].filter(Boolean);
+
+      const candidateConversationPayloads = [
+        {
+          created_by: senderProfileId,
+          is_group: false,
+          participant_emails: participantEmails,
+        },
+        {
+          is_group: false,
+          participant_emails: participantEmails,
+        },
+        {
+          participant_emails: participantEmails,
+        },
+        {
+          participant_emails: participantEmails.join(","),
+        },
+        {
+          is_group: false,
+        },
+        {},
+      ];
+
+      let createdConversation = null;
+      let conversationError = null;
+
+      for (const payload of candidateConversationPayloads) {
+        const { data, error } = await profileClient
           .from("conversations")
-          .insert({
-            created_by: senderProfileId,
-            is_group: false,
-          })
+          .insert(payload)
           .select("id")
           .single();
+
+        if (!error && data?.id) {
+          createdConversation = data;
+          conversationError = null;
+          break;
+        }
+
+        conversationError = error;
+
+        const lowerMessage = String(error?.message || "").toLowerCase();
+        const hasUnknownColumnError =
+          lowerMessage.includes("could not find") ||
+          lowerMessage.includes("column") ||
+          lowerMessage.includes("schema cache");
+
+        if (!hasUnknownColumnError) {
+          break;
+        }
+      }
 
       if (conversationError || !createdConversation?.id) {
         return res.status(500).json({
@@ -134,20 +211,53 @@ const registerPostMessageRoute = (app, ctx) => {
 
       conversationId = createdConversation.id;
 
-      const { error: membersInsertError } = await profileClient
-        .from("conversation_members")
-        .insert([
-          {
-            conversation_id: conversationId,
-            user_id: senderProfileId,
-            role: "member",
-          },
-          {
-            conversation_id: conversationId,
-            user_id: receiverProfileId,
-            role: "member",
-          },
-        ]);
+      const memberRowsWithRole = [
+        {
+          conversation_id: conversationId,
+          [memberUserColumn]: senderMemberValue,
+          role: "member",
+        },
+        {
+          conversation_id: conversationId,
+          [memberUserColumn]: receiverMemberValue,
+          role: "member",
+        },
+      ];
+
+      const memberRowsWithoutRole = [
+        {
+          conversation_id: conversationId,
+          [memberUserColumn]: senderMemberValue,
+        },
+        {
+          conversation_id: conversationId,
+          [memberUserColumn]: receiverMemberValue,
+        },
+      ];
+
+      let membersInsertError = null;
+      for (const payload of [memberRowsWithRole, memberRowsWithoutRole]) {
+        const { error } = await profileClient
+          .from("conversation_members")
+          .insert(payload);
+
+        if (!error) {
+          membersInsertError = null;
+          break;
+        }
+
+        membersInsertError = error;
+
+        const lowerMessage = String(error?.message || "").toLowerCase();
+        const hasUnknownColumnError =
+          lowerMessage.includes("could not find") ||
+          lowerMessage.includes("column") ||
+          lowerMessage.includes("schema cache");
+
+        if (!hasUnknownColumnError) {
+          break;
+        }
+      }
 
       if (membersInsertError) {
         return res.status(500).json({
@@ -161,10 +271,12 @@ const registerPostMessageRoute = (app, ctx) => {
       .from(ctx.messagesTable)
       .insert({
         conversation_id: conversationId,
-        sender_id: senderProfileId,
-        body,
+        [messageColumns.senderColumn]: senderMessageSenderValue,
+        [messageColumns.bodyColumn]: body,
       })
-      .select("id, sender_id, conversation_id, body, created_at")
+      .select(
+        `id, ${messageColumns.senderColumn}, conversation_id, ${messageColumns.bodyColumn}, created_at`,
+      )
       .single();
 
     if (error) {
@@ -173,14 +285,25 @@ const registerPostMessageRoute = (app, ctx) => {
       });
     }
 
+    if (typeof ctx.emitMessageCreated === "function") {
+      ctx.emitMessageCreated({
+        id: data?.id || null,
+        text: String(data?.[messageColumns.bodyColumn] || ""),
+        timestamp: data?.created_at || null,
+        senderId: senderProfileId,
+        receiverId: receiverProfileId,
+        conversationId,
+      });
+    }
+
     return res.status(201).json({
       message: {
         id: data?.id || null,
-        text: String(data?.body || ""),
+        text: String(data?.[messageColumns.bodyColumn] || ""),
         timestamp: data?.created_at || null,
         fromMe: true,
-        senderPhone: ctx.formatPhoneFromDb(senderPhoneForDb),
-        receiverPhone: ctx.formatPhoneFromDb(receiverPhoneForDb),
+        senderPhone: ctx.formatPhoneFromDb(senderPhoneFromDb),
+        receiverPhone: ctx.formatPhoneFromDb(receiverPhoneFromDb),
         read: false,
         readAt: null,
       },

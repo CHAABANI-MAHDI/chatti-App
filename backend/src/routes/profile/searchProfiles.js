@@ -1,5 +1,10 @@
 const registerSearchProfilesRoute = (app, ctx) => {
   app.get("/profiles/search", async (req, res) => {
+    const isUuid = (value = "") =>
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        String(value || "").trim(),
+      );
+
     const profileClient = ctx.getProfileClient(req);
     if (!profileClient) {
       return res.status(500).json({
@@ -9,14 +14,11 @@ const registerSearchProfilesRoute = (app, ctx) => {
     }
 
     const rawQuery = String(req.query?.query || "").trim();
-    const rawExcludePhone = ctx.normalizePhone(
-      String(req.query?.excludePhone || ""),
-    );
+    const rawExcludeId = String(req.query?.excludeId || "").trim();
 
-    if (rawExcludePhone && !ctx.validatePhoneForProfile(rawExcludePhone)) {
+    if (rawExcludeId && !isUuid(rawExcludeId)) {
       return res.status(400).json({
-        message:
-          "Exclude phone must be a valid number with country code (example: +216123456).",
+        message: "excludeId must be a valid UUID.",
       });
     }
 
@@ -26,21 +28,23 @@ const registerSearchProfilesRoute = (app, ctx) => {
 
     const baseSelect =
       "id, phone, email, display_name, avatar_url, status_text";
-    const excludePhoneForDb = rawExcludePhone
-      ? ctx.normalizePhoneForDb(rawExcludePhone)
-      : "";
     const normalizedQuery = rawQuery.toLowerCase();
 
-    const applyExcludePhone = (queryBuilder) =>
-      excludePhoneForDb
-        ? queryBuilder.neq("phone", excludePhoneForDb)
-        : queryBuilder;
+    const applyExclusions = (queryBuilder) => {
+      let nextQuery = queryBuilder;
+
+      if (rawExcludeId) {
+        nextQuery = nextQuery.neq("id", rawExcludeId);
+      }
+
+      return nextQuery;
+    };
 
     let rows = [];
     let queryError = null;
 
     if (ctx.validateEmail(rawQuery)) {
-      const { data, error } = await applyExcludePhone(
+      const { data, error } = await applyExclusions(
         profileClient
           .from(ctx.profilesTable)
           .select(baseSelect)
@@ -51,7 +55,7 @@ const registerSearchProfilesRoute = (app, ctx) => {
       rows = data || [];
       queryError = error;
     } else {
-      const { data: byName, error: byNameError } = await applyExcludePhone(
+      const { data: byName, error: byNameError } = await applyExclusions(
         profileClient
           .from(ctx.profilesTable)
           .select(baseSelect)
@@ -62,7 +66,7 @@ const registerSearchProfilesRoute = (app, ctx) => {
       if (byNameError) {
         queryError = byNameError;
       } else {
-        const { data: byEmail, error: byEmailError } = await applyExcludePhone(
+        const { data: byEmail, error: byEmailError } = await applyExclusions(
           profileClient
             .from(ctx.profilesTable)
             .select(baseSelect)
@@ -86,6 +90,12 @@ const registerSearchProfilesRoute = (app, ctx) => {
     }
 
     if (queryError) {
+      if (ctx.isAuthTokenExpired(queryError)) {
+        return res.status(401).json({
+          message: "JWT expired",
+        });
+      }
+
       if (
         String(queryError.message || "")
           .toLowerCase()

@@ -36,6 +36,17 @@ const buildContext = () => {
     supabaseAnonKey || supabaseServiceRoleKey,
   );
   const supabaseServiceClient = createSupabase(supabaseServiceRoleKey);
+  let conversationMemberUserColumnCache = String(
+    process.env.CONVERSATION_MEMBER_USER_COLUMN || "",
+  )
+    .trim()
+    .toLowerCase();
+  let messageSenderColumnCache = String(process.env.MESSAGE_SENDER_COLUMN || "")
+    .trim()
+    .toLowerCase();
+  let messageBodyColumnCache = String(process.env.MESSAGE_BODY_COLUMN || "")
+    .trim()
+    .toLowerCase();
 
   const getBearerToken = (req) => {
     const rawHeader = String(req.headers?.authorization || "").trim();
@@ -68,7 +79,7 @@ const buildContext = () => {
 
   const validatePhone = (phone) => /^\+[1-9]\d{7,14}$/.test(phone);
   const validateEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-  const normalizePhoneForDb = (phone) => phone.replace(/\D/g, "");
+  const normalizePhoneForDb = (phone) => String(phone || "").replace(/\D/g, "");
   const validatePhoneForProfile = (phone) => {
     const digits = normalizePhoneForDb(phone);
     return /^[1-9]\d{7,14}$/.test(digits);
@@ -106,6 +117,18 @@ const buildContext = () => {
       details: error.details || "",
       hint: error.hint || "",
     };
+  };
+
+  const isAuthTokenExpired = (error = null) => {
+    const message = String(error?.message || "").toLowerCase();
+    const status = Number(error?.status || 0);
+
+    return (
+      status === 401 ||
+      message.includes("jwt expired") ||
+      message.includes("invalid jwt") ||
+      message.includes("token expired")
+    );
   };
 
   const isDevEnvironment = process.env.NODE_ENV !== "production";
@@ -412,6 +435,195 @@ const buildContext = () => {
     };
   };
 
+  const resolveOwnerProfile = async (req, profileClient, ownerId = "") => {
+    const normalizedOwnerId = String(ownerId || "").trim();
+    if (!profileClient || !normalizedOwnerId) {
+      return {
+        profile: null,
+        error: null,
+      };
+    }
+
+    const { data: byIdRows, error: byIdError } = await profileClient
+      .from(profilesTable)
+      .select("id, email, phone")
+      .eq("id", normalizedOwnerId)
+      .limit(1);
+
+    if (byIdError) {
+      return {
+        profile: null,
+        error: byIdError,
+      };
+    }
+
+    if (byIdRows?.[0]?.id) {
+      return {
+        profile: byIdRows[0],
+        error: null,
+      };
+    }
+
+    const { user } = await resolveAuthenticatedUser(req);
+    if (!user || String(user.id || "").trim() !== normalizedOwnerId) {
+      return {
+        profile: null,
+        error: null,
+      };
+    }
+
+    const metadata = user.user_metadata || {};
+    const authEmail = normalizeEmail(user.email || metadata.email || "");
+    if (validateEmail(authEmail)) {
+      const { data: byEmailRows, error: byEmailError } = await profileClient
+        .from(profilesTable)
+        .select("id, email, phone")
+        .eq("email", authEmail)
+        .limit(1);
+
+      if (byEmailError) {
+        return {
+          profile: null,
+          error: byEmailError,
+        };
+      }
+
+      if (byEmailRows?.[0]?.id) {
+        return {
+          profile: byEmailRows[0],
+          error: null,
+        };
+      }
+    }
+
+    const authPhoneForDb = normalizePhoneForDb(
+      metadata.phone || user.phone || "",
+    );
+    if (authPhoneForDb) {
+      const { data: byPhoneRows, error: byPhoneError } = await profileClient
+        .from(profilesTable)
+        .select("id, email, phone")
+        .eq("phone", authPhoneForDb)
+        .limit(1);
+
+      if (byPhoneError) {
+        return {
+          profile: null,
+          error: byPhoneError,
+        };
+      }
+
+      if (byPhoneRows?.[0]?.id) {
+        return {
+          profile: byPhoneRows[0],
+          error: null,
+        };
+      }
+    }
+
+    return {
+      profile: null,
+      error: null,
+    };
+  };
+
+  const resolveConversationMemberUserColumn = async (profileClient) => {
+    if (conversationMemberUserColumnCache) {
+      return conversationMemberUserColumnCache;
+    }
+
+    if (!profileClient) {
+      return "user_id";
+    }
+
+    const candidates = ["user_id", "profile_id", "user_email"];
+
+    for (const candidate of candidates) {
+      const { error } = await profileClient
+        .from("conversation_members")
+        .select(candidate)
+        .limit(1);
+
+      if (!error) {
+        conversationMemberUserColumnCache = candidate;
+        return candidate;
+      }
+    }
+
+    return "user_id";
+  };
+
+  const resolveConversationMemberValue = (
+    profile = {},
+    memberUserColumn = "user_id",
+  ) => {
+    if (memberUserColumn === "user_email") {
+      return normalizeEmail(profile?.email || "");
+    }
+
+    return String(profile?.id || "").trim();
+  };
+
+  const resolveMessageColumns = async (profileClient) => {
+    if (messageSenderColumnCache && messageBodyColumnCache) {
+      return {
+        senderColumn: messageSenderColumnCache,
+        bodyColumn: messageBodyColumnCache,
+      };
+    }
+
+    const safeClient =
+      profileClient || supabaseServiceClient || supabaseAuthClient;
+    if (!safeClient) {
+      return {
+        senderColumn: "sender_id",
+        bodyColumn: "body",
+      };
+    }
+
+    if (!messageSenderColumnCache) {
+      for (const candidate of ["sender_id", "sender_email"]) {
+        const { error } = await safeClient
+          .from(messagesTable)
+          .select(candidate)
+          .limit(1);
+        if (!error) {
+          messageSenderColumnCache = candidate;
+          break;
+        }
+      }
+    }
+
+    if (!messageBodyColumnCache) {
+      for (const candidate of ["body", "content"]) {
+        const { error } = await safeClient
+          .from(messagesTable)
+          .select(candidate)
+          .limit(1);
+        if (!error) {
+          messageBodyColumnCache = candidate;
+          break;
+        }
+      }
+    }
+
+    return {
+      senderColumn: messageSenderColumnCache || "sender_id",
+      bodyColumn: messageBodyColumnCache || "body",
+    };
+  };
+
+  const resolveMessageSenderValue = (
+    profile = {},
+    senderColumn = "sender_id",
+  ) => {
+    if (senderColumn === "sender_email") {
+      return normalizeEmail(profile?.email || "");
+    }
+
+    return String(profile?.id || "").trim();
+  };
+
   return {
     port,
     profilesTable,
@@ -430,6 +642,7 @@ const buildContext = () => {
     formatPhoneFromDb,
     mapSmsProviderError,
     serializeSupabaseError,
+    isAuthTokenExpired,
     isDevEnvironment,
     getBucketPathFromUrl,
     isExternalHttpUrl,
@@ -443,6 +656,11 @@ const buildContext = () => {
     extensionFromMime,
     resolveRequesterId,
     resolveAuthenticatedUser,
+    resolveOwnerProfile,
+    resolveConversationMemberUserColumn,
+    resolveConversationMemberValue,
+    resolveMessageColumns,
+    resolveMessageSenderValue,
   };
 };
 

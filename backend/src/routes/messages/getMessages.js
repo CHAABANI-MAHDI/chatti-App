@@ -1,5 +1,10 @@
 const registerGetMessagesRoute = (app, ctx) => {
   app.get("/messages", async (req, res) => {
+    const isUuid = (value = "") =>
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        String(value || "").trim(),
+      );
+
     const profileClient = ctx.getProfileClient(req);
     if (!profileClient) {
       return res.status(500).json({
@@ -8,33 +13,25 @@ const registerGetMessagesRoute = (app, ctx) => {
       });
     }
 
-    const rawOwnerPhone = ctx.normalizePhone(
-      String(req.query?.ownerPhone || ""),
-    );
-    const rawContactPhone = ctx.normalizePhone(
-      String(req.query?.contactPhone || ""),
-    );
+    const rawOwnerId = String(req.query?.ownerId || "").trim();
+    const rawContactId = String(req.query?.contactId || "").trim();
+    const hasOwnerId = isUuid(rawOwnerId);
+    const hasContactId = isUuid(rawContactId);
 
-    if (!ctx.validatePhoneForProfile(rawOwnerPhone)) {
+    if (!hasOwnerId) {
       return res.status(400).json({
-        message: "ownerPhone is invalid.",
+        message: "ownerId must be a valid UUID.",
       });
     }
 
-    if (!ctx.validatePhoneForProfile(rawContactPhone)) {
+    if (!hasContactId) {
       return res.status(400).json({
-        message: "contactPhone is invalid.",
+        message: "contactId must be a valid UUID.",
       });
     }
 
-    const ownerPhoneForDb = ctx.normalizePhoneForDb(rawOwnerPhone);
-    const contactPhoneForDb = ctx.normalizePhoneForDb(rawContactPhone);
-
-    const { data: ownerProfiles, error: ownerError } = await profileClient
-      .from(ctx.profilesTable)
-      .select("id")
-      .eq("phone", ownerPhoneForDb)
-      .limit(1);
+    const { profile: ownerProfile, error: ownerError } =
+      await ctx.resolveOwnerProfile(req, profileClient, rawOwnerId);
 
     if (ownerError) {
       return res.status(500).json({
@@ -42,11 +39,13 @@ const registerGetMessagesRoute = (app, ctx) => {
       });
     }
 
-    const { data: contactProfiles, error: contactError } = await profileClient
+    const contactLookupQuery = profileClient
       .from(ctx.profilesTable)
-      .select("id")
-      .eq("phone", contactPhoneForDb)
+      .select("id, email, phone")
       .limit(1);
+
+    const { data: contactProfiles, error: contactError } =
+      await contactLookupQuery.eq("id", rawContactId);
 
     if (contactError) {
       return res.status(500).json({
@@ -54,10 +53,35 @@ const registerGetMessagesRoute = (app, ctx) => {
       });
     }
 
-    const ownerProfileId = ownerProfiles?.[0]?.id || "";
+    const ownerProfileId = ownerProfile?.id || "";
     const contactProfileId = contactProfiles?.[0]?.id || "";
+    const contactProfile = contactProfiles?.[0] || null;
+    const ownerPhoneFromDb = ownerProfile?.phone || "";
+    const contactPhoneFromDb = contactProfiles?.[0]?.phone || "";
 
-    if (!ownerProfileId || !contactProfileId) {
+    const memberUserColumn =
+      await ctx.resolveConversationMemberUserColumn(profileClient);
+    const messageColumns = await ctx.resolveMessageColumns(profileClient);
+
+    const ownerMemberValue = ctx.resolveConversationMemberValue(
+      ownerProfile,
+      memberUserColumn,
+    );
+    const contactMemberValue = ctx.resolveConversationMemberValue(
+      contactProfile,
+      memberUserColumn,
+    );
+    const ownerMessageSenderValue = ctx.resolveMessageSenderValue(
+      ownerProfile,
+      messageColumns.senderColumn,
+    );
+
+    if (
+      !ownerProfileId ||
+      !contactProfileId ||
+      !ownerMemberValue ||
+      !contactMemberValue
+    ) {
       return res.status(200).json({ messages: [] });
     }
 
@@ -65,7 +89,7 @@ const registerGetMessagesRoute = (app, ctx) => {
       await profileClient
         .from("conversation_members")
         .select("conversation_id")
-        .eq("user_id", ownerProfileId);
+        .eq(memberUserColumn, ownerMemberValue);
 
     if (ownerMembershipError) {
       return res.status(500).json({
@@ -91,7 +115,7 @@ const registerGetMessagesRoute = (app, ctx) => {
       await profileClient
         .from("conversation_members")
         .select("conversation_id")
-        .eq("user_id", contactProfileId)
+        .eq(memberUserColumn, contactMemberValue)
         .in("conversation_id", ownerConversationIds)
         .limit(1);
 
@@ -110,7 +134,9 @@ const registerGetMessagesRoute = (app, ctx) => {
 
     const { data, error } = await profileClient
       .from(ctx.messagesTable)
-      .select("id, sender_id, conversation_id, body, created_at")
+      .select(
+        `id, ${messageColumns.senderColumn}, conversation_id, ${messageColumns.bodyColumn}, created_at`,
+      )
       .eq("conversation_id", conversationId)
       .order("created_at", { ascending: true })
       .limit(5000);
@@ -124,18 +150,18 @@ const registerGetMessagesRoute = (app, ctx) => {
     return res.status(200).json({
       messages: (data || []).map((row) => ({
         id: row.id || null,
-        text: String(row.body || ""),
+        text: String(row[messageColumns.bodyColumn] || ""),
         timestamp: row.created_at || null,
-        fromMe: row.sender_id === ownerProfileId,
+        fromMe: row[messageColumns.senderColumn] === ownerMessageSenderValue,
         senderPhone:
-          row.sender_id === ownerProfileId
-            ? ctx.formatPhoneFromDb(ownerPhoneForDb)
-            : ctx.formatPhoneFromDb(contactPhoneForDb),
+          row[messageColumns.senderColumn] === ownerMessageSenderValue
+            ? ctx.formatPhoneFromDb(ownerPhoneFromDb)
+            : ctx.formatPhoneFromDb(contactPhoneFromDb),
         receiverPhone:
-          row.sender_id === ownerProfileId
-            ? ctx.formatPhoneFromDb(contactPhoneForDb)
-            : ctx.formatPhoneFromDb(ownerPhoneForDb),
-        read: row.sender_id === ownerProfileId,
+          row[messageColumns.senderColumn] === ownerMessageSenderValue
+            ? ctx.formatPhoneFromDb(contactPhoneFromDb)
+            : ctx.formatPhoneFromDb(ownerPhoneFromDb),
+        read: row[messageColumns.senderColumn] === ownerMessageSenderValue,
         readAt: null,
       })),
     });
