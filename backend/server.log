@@ -1,0 +1,67 @@
+Backend running on http://localhost:5001
+C:\Users\PC\Relatime-Chat-App\backend\src\shared\context.js:71
+  const normalizePhoneForDb = (phone) => phone.replace(/\D/g, "");
+                                               ^
+
+TypeError: Cannot read properties of null (reading 'replace')
+    at normalizePhoneForDb (C:\Users\PC\Relatime-Chat-App\backend\src\shared\context.js:71:48)
+    at formatPhoneFromDb (C:\Users\PC\Relatime-Chat-App\backend\src\shared\context.js:77:20)
+    at Object.mapProfileRecord (C:\Users\PC\Relatime-Chat-App\backend\src\shared\context.js:206:12)
+    at C:\Users\PC\Relatime-Chat-App\backend\src\routes\profile\searchProfiles.js:110:29
+    at Array.map (<anonymous>)
+    at C:\Users\PC\Relatime-Chat-App\backend\src\routes\profile\searchProfiles.js:110:12
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+
+Node.js v22.15.0
+node:events:496
+      throw er; // Unhandled 'error' event
+      ^
+
+Error: listen EADDRINUSE: address already in use :::5001
+    at Server.setupListenHandle [as _listen2] (node:net:1939:16)
+    at listenInCluster (node:net:1996:12)
+    at Server.listen (node:net:2101:7)
+    at Function.listen (C:\Users\PC\Relatime-Chat-App\backend\node_modules\express\lib\application.js:635:24)
+    at Object.<anonymous> (C:\Users\PC\Relatime-Chat-App\backend\src\server.js:5:5)
+    at Module._compile (node:internal/modules/cjs/loader:1730:14)
+    at Object..js (node:internal/modules/cjs/loader:1895:10)
+    at Module.load (node:internal/modules/cjs/loader:1465:32)
+    at Function._load (node:internal/modules/cjs/loader:1282:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+Emitted 'error' event on Server instance at:
+    at emitErrorNT (node:net:1975:8)
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21) {
+  code: 'EADDRINUSE',
+  errno: -4091,
+  syscall: 'listen',
+  address: '::',
+  port: 5001
+}
+
+Node.js v22.15.0
+node:events:496
+      throw er; // Unhandled 'error' event
+      ^
+
+Error: listen EADDRINUSE: address already in use :::5001
+    at Server.setupListenHandle [as _listen2] (node:net:1939:16)
+    at listenInCluster (node:net:1996:12)
+    at Server.listen (node:net:2101:7)
+    at Function.listen (C:\Users\PC\Relatime-Chat-App\backend\node_modules\express\lib\application.js:635:24)
+    at Object.<anonymous> (C:\Users\PC\Relatime-Chat-App\backend\src\server.js:5:5)
+    at Module._compile (node:internal/modules/cjs/loader:1730:14)
+    at Object..js (node:internal/modules/cjs/loader:1895:10)
+    at Module.load (node:internal/modules/cjs/loader:1465:32)
+    at Function._load (node:internal/modules/cjs/loader:1282:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+Emitted 'error' event on Server instance at:
+    at emitErrorNT (node:net:1975:8)
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21) {
+  code: 'EADDRINUSE',
+  errno: -4091,
+  syscall: 'listen',
+  address: '::',
+  port: 5001
+}
+
+Node.js v22.15.0
