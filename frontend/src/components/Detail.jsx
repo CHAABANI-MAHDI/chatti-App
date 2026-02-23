@@ -1,6 +1,151 @@
 import { useEffect, useRef, useState } from "react";
 import EmojiPicker from "emoji-picker-react";
 
+const formatDuration = (totalSeconds = 0) => {
+  const safeSeconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  const minutes = Math.floor(safeSeconds / 60)
+    .toString()
+    .padStart(2, "0");
+  const seconds = (safeSeconds % 60).toString().padStart(2, "0");
+  return `${minutes}:${seconds}`;
+};
+
+function VoicePlayback({ src, className = "" }) {
+  const audioRef = useRef(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [durationSeconds, setDurationSeconds] = useState(0);
+  const [currentSeconds, setCurrentSeconds] = useState(0);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return undefined;
+
+    const handleLoadedMetadata = () => {
+      const duration = Number(audio.duration || 0);
+      setDurationSeconds(Number.isFinite(duration) ? duration : 0);
+    };
+
+    const handleTimeUpdate = () => {
+      setCurrentSeconds(Number(audio.currentTime || 0));
+    };
+
+    const handleEnded = () => {
+      setIsPlaying(false);
+      setCurrentSeconds(0);
+    };
+
+    const handlePause = () => {
+      setIsPlaying(false);
+    };
+
+    const handlePlay = () => {
+      setIsPlaying(true);
+    };
+
+    audio.addEventListener("loadedmetadata", handleLoadedMetadata);
+    audio.addEventListener("timeupdate", handleTimeUpdate);
+    audio.addEventListener("ended", handleEnded);
+    audio.addEventListener("pause", handlePause);
+    audio.addEventListener("play", handlePlay);
+
+    return () => {
+      audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
+      audio.removeEventListener("timeupdate", handleTimeUpdate);
+      audio.removeEventListener("ended", handleEnded);
+      audio.removeEventListener("pause", handlePause);
+      audio.removeEventListener("play", handlePlay);
+    };
+  }, [src]);
+
+  const togglePlay = async () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (audio.paused) {
+      try {
+        await audio.play();
+      } catch {
+        setIsPlaying(false);
+      }
+      return;
+    }
+
+    audio.pause();
+  };
+
+  const onSeek = (event) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const nextSeconds = Number(event.target.value || 0);
+    audio.currentTime = nextSeconds;
+    setCurrentSeconds(nextSeconds);
+  };
+
+  const progressPercent =
+    durationSeconds > 0
+      ? Math.min(100, (currentSeconds / durationSeconds) * 100)
+      : 0;
+  const waveformBars = [22, 38, 30, 52, 28, 42, 35, 55, 33, 40, 26, 48, 34, 44];
+
+  return (
+    <div
+      className={`rounded-xl border border-white/20 bg-black/25 p-2 ${className}`}
+    >
+      <audio ref={audioRef} preload="metadata" src={src} className="hidden" />
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={togglePlay}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/25 bg-white/10 text-white/90 hover:bg-white/15"
+          title={isPlaying ? "Pause voice" : "Play voice"}
+        >
+          {isPlaying ? (
+            <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M6 4h3v12H6zM11 4h3v12h-3z" />
+            </svg>
+          ) : (
+            <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M6 4l10 6-10 6V4z" />
+            </svg>
+          )}
+        </button>
+
+        <div className="min-w-0 flex-1">
+          <div className="mb-1 flex h-6 items-end gap-0.5">
+            {waveformBars.map((height, index) => {
+              const threshold = ((index + 1) / waveformBars.length) * 100;
+              const isActive = progressPercent >= threshold;
+              return (
+                <span
+                  key={`${height}-${index}`}
+                  className={`w-1 rounded-full ${isActive ? "bg-lime-300/90" : "bg-white/35"}`}
+                  style={{ height: `${height}%` }}
+                />
+              );
+            })}
+          </div>
+
+          <input
+            type="range"
+            min={0}
+            max={durationSeconds || 0}
+            step={0.1}
+            value={Math.min(currentSeconds, durationSeconds || 0)}
+            onChange={onSeek}
+            className="w-full accent-lime-300"
+          />
+
+          <div className="mt-0.5 flex items-center justify-between text-[10px] text-white/70">
+            <span>{formatDuration(currentSeconds)}</span>
+            <span>{formatDuration(durationSeconds)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Detail({
   chat,
   onSendMessage,
@@ -14,6 +159,7 @@ function Detail({
   const [pendingAudioDataUrl, setPendingAudioDataUrl] = useState("");
   const [pendingAudioName, setPendingAudioName] = useState("");
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
+  const [recordingElapsedSeconds, setRecordingElapsedSeconds] = useState(0);
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   const [newMessageCount, setNewMessageCount] = useState(0);
   const messagesContainerRef = useRef(null);
@@ -22,6 +168,9 @@ function Detail({
   const mediaRecorderRef = useRef(null);
   const recordingChunksRef = useRef([]);
   const recordingStreamRef = useRef(null);
+  const recordingCancelledRef = useRef(false);
+  const recordingStartedAtRef = useRef(0);
+  const recordingTimerRef = useRef(null);
   const shouldAutoScrollRef = useRef(true);
   const lastHandledMessageKeyRef = useRef("");
 
@@ -30,6 +179,11 @@ function Detail({
 
   // Reset state when switching chats
   useEffect(() => {
+    if (mediaRecorderRef.current?.state === "recording") {
+      recordingCancelledRef.current = true;
+      mediaRecorderRef.current.stop();
+    }
+
     setIsInfoOpen(false);
     setMessageText("");
     setPendingImageDataUrl("");
@@ -37,6 +191,7 @@ function Detail({
     setPendingAudioDataUrl("");
     setPendingAudioName("");
     setIsRecordingAudio(false);
+    setRecordingElapsedSeconds(0);
     setIsEmojiPickerOpen(false);
     setNewMessageCount(0);
     shouldAutoScrollRef.current = true;
@@ -85,7 +240,58 @@ function Detail({
   }, [chat?.id, lastMessage]);
 
   useEffect(() => {
+    if (!isRecordingAudio) {
+      if (recordingTimerRef.current) {
+        window.clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+      return undefined;
+    }
+
+    const updateElapsed = () => {
+      const elapsed = Math.floor(
+        (Date.now() - recordingStartedAtRef.current) / 1000,
+      );
+      setRecordingElapsedSeconds(Math.max(0, elapsed));
+    };
+
+    updateElapsed();
+    recordingTimerRef.current = window.setInterval(updateElapsed, 1000);
+
     return () => {
+      if (recordingTimerRef.current) {
+        window.clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+    };
+  }, [isRecordingAudio]);
+
+  useEffect(() => {
+    if (!isRecordingAudio) return undefined;
+
+    const handleEscapeToCancel = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+
+      if (mediaRecorderRef.current?.state === "recording") {
+        recordingCancelledRef.current = true;
+        mediaRecorderRef.current.stop();
+      }
+    };
+
+    window.addEventListener("keydown", handleEscapeToCancel);
+    return () => {
+      window.removeEventListener("keydown", handleEscapeToCancel);
+    };
+  }, [isRecordingAudio]);
+
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) {
+        window.clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+
       if (mediaRecorderRef.current?.state === "recording") {
         mediaRecorderRef.current.stop();
       }
@@ -150,6 +356,12 @@ function Detail({
     }
   };
 
+  const cancelAudioRecording = () => {
+    if (mediaRecorderRef.current?.state !== "recording") return;
+    recordingCancelledRef.current = true;
+    mediaRecorderRef.current.stop();
+  };
+
   const startAudioRecording = async () => {
     if (isRecordingAudio || sendingMessage) return;
     if (
@@ -167,6 +379,9 @@ function Detail({
       const recorder = new MediaRecorder(stream);
       recordingChunksRef.current = [];
       mediaRecorderRef.current = recorder;
+      recordingCancelledRef.current = false;
+      recordingStartedAtRef.current = Date.now();
+      setRecordingElapsedSeconds(0);
 
       recorder.ondataavailable = (event) => {
         if (event.data && event.data.size > 0) {
@@ -187,6 +402,19 @@ function Detail({
 
         if (!chunks.length) {
           setIsRecordingAudio(false);
+          setRecordingElapsedSeconds(0);
+          recordingCancelledRef.current = false;
+          recordingStartedAtRef.current = 0;
+          mediaRecorderRef.current = null;
+          return;
+        }
+
+        if (recordingCancelledRef.current) {
+          setIsRecordingAudio(false);
+          setRecordingElapsedSeconds(0);
+          recordingCancelledRef.current = false;
+          recordingStartedAtRef.current = 0;
+          mediaRecorderRef.current = null;
           return;
         }
 
@@ -197,6 +425,10 @@ function Detail({
         if (blob.size > 10 * 1024 * 1024) {
           alert("Audio is too large. Max allowed size is 10MB.");
           setIsRecordingAudio(false);
+          setRecordingElapsedSeconds(0);
+          recordingCancelledRef.current = false;
+          recordingStartedAtRef.current = 0;
+          mediaRecorderRef.current = null;
           return;
         }
 
@@ -209,6 +441,10 @@ function Detail({
             `Voice message (${Math.ceil(blob.size / 1024)} KB)`,
           );
           setIsRecordingAudio(false);
+          setRecordingElapsedSeconds(0);
+          recordingCancelledRef.current = false;
+          recordingStartedAtRef.current = 0;
+          mediaRecorderRef.current = null;
         };
         fileReader.readAsDataURL(blob);
       };
@@ -219,6 +455,10 @@ function Detail({
     } catch (error) {
       alert(error?.message || "Microphone access denied.");
       setIsRecordingAudio(false);
+      setRecordingElapsedSeconds(0);
+      recordingCancelledRef.current = false;
+      recordingStartedAtRef.current = 0;
+      mediaRecorderRef.current = null;
       if (recordingStreamRef.current) {
         recordingStreamRef.current.getTracks().forEach((track) => track.stop());
         recordingStreamRef.current = null;
@@ -338,14 +578,12 @@ function Detail({
                   </p>
                 ) : null}
                 {message.audioUrl ? (
-                  <audio
-                    controls
-                    preload="none"
+                  <VoicePlayback
                     src={message.audioUrl}
                     className={
                       message.text || message.imageUrl
-                        ? "mt-2 w-full min-w-[220px]"
-                        : "w-full min-w-[220px]"
+                        ? "mt-2 w-full min-w-[240px]"
+                        : "w-full min-w-[240px]"
                     }
                   />
                 ) : null}
@@ -614,12 +852,7 @@ function Detail({
               <p className="truncate text-xs text-white/85">
                 {pendingAudioName || "Voice message"}
               </p>
-              <audio
-                controls
-                preload="none"
-                src={pendingAudioDataUrl}
-                className="mt-1 w-full"
-              />
+              <VoicePlayback src={pendingAudioDataUrl} className="mt-1" />
             </div>
             <button
               type="button"
@@ -634,7 +867,15 @@ function Detail({
 
       {isRecordingAudio ? (
         <div className="mt-2 rounded-xl border border-rose-300/35 bg-rose-300/10 px-3 py-2 text-xs text-rose-100">
-          Recording voice... tap mic again to stop.
+          Recording voice... {formatDuration(recordingElapsedSeconds)} (tap mic
+          to stop, Esc to cancel)
+          <button
+            type="button"
+            onClick={cancelAudioRecording}
+            className="ml-2 rounded border border-rose-200/40 bg-rose-300/15 px-2 py-0.5 text-[10px] text-rose-50 hover:bg-rose-300/25"
+          >
+            Cancel
+          </button>
         </div>
       ) : null}
 
