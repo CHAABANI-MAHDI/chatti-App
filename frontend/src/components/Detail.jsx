@@ -171,6 +171,7 @@ function Detail({
   const recordingCancelledRef = useRef(false);
   const recordingStartedAtRef = useRef(0);
   const recordingTimerRef = useRef(null);
+  const preservedScrollTopRef = useRef(0);
   const shouldAutoScrollRef = useRef(true);
   const lastHandledMessageKeyRef = useRef("");
 
@@ -238,6 +239,19 @@ function Detail({
       setNewMessageCount((prev) => prev + 1);
     }
   }, [chat?.id, lastMessage]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const node = messagesContainerRef.current;
+      if (!node) return;
+
+      if (preservedScrollTopRef.current > 0) {
+        node.scrollTop = preservedScrollTopRef.current;
+      }
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [isInfoOpen]);
 
   useEffect(() => {
     if (!isRecordingAudio) {
@@ -490,6 +504,15 @@ function Detail({
     } catch (error) {
       alert(error.message || "Failed to send message.");
     }
+  };
+
+  const toggleInfoPanel = () => {
+    const node = messagesContainerRef.current;
+    if (node) {
+      preservedScrollTopRef.current = node.scrollTop;
+    }
+
+    setIsInfoOpen((prev) => !prev);
   };
 
   // ── Empty state ────────────────────────────────────────────────────────────
@@ -967,7 +990,7 @@ function Detail({
             </button>
             <button
               type="button"
-              onClick={() => setIsInfoOpen((prev) => !prev)}
+              onClick={toggleInfoPanel}
               className={`rounded-md border px-2 py-1 text-xs text-white/90 ${
                 isInfoOpen
                   ? "border-lime-300/70 bg-lime-200/20"
