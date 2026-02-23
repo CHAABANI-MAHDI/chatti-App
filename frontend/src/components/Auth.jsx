@@ -144,6 +144,7 @@ function Auth({ onAuthSuccess }) {
 
       const user = payload.user || {};
       onAuthSuccess({
+        id: user.id || "",
         name: user.name || "User",
         email: user.email || email,
         phone: user.phone || "",

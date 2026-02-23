@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Auth from "./components/Auth";
 import Chat from "./components/Chat";
 import { API_BASE_URL } from "./lib/apiBaseUrl";
@@ -70,7 +70,7 @@ const App = () => {
     initialSession.rememberMe,
   );
 
-  const persistSession = (user, rememberMe) => {
+  const persistSession = useCallback((user, rememberMe) => {
     const sessionPayload = {
       user,
       rememberMe,
@@ -90,17 +90,20 @@ const App = () => {
 
     sessionStorage.setItem(TAB_SESSION_KEY, JSON.stringify(sessionPayload));
     localStorage.removeItem(PERSISTENT_SESSION_KEY);
-  };
+  }, []);
 
-  const startUserSession = (user, rememberMe) => {
-    setCurrentUser(user);
-    setRememberMeSession(rememberMe);
-    persistSession(user, rememberMe);
-  };
+  const startUserSession = useCallback(
+    (user, rememberMe) => {
+      setCurrentUser(user);
+      setRememberMeSession(rememberMe);
+      persistSession(user, rememberMe);
+    },
+    [persistSession],
+  );
 
-  const fetchProfileByPhone = async (phone, accessToken = "") => {
+  const fetchProfileById = useCallback(async (id, accessToken = "") => {
     const response = await fetch(
-      `${API_BASE_URL}/profile/${encodeURIComponent(phone)}`,
+      `${API_BASE_URL}/profile/${encodeURIComponent(id)}`,
       {
         headers: accessToken
           ? {
@@ -120,7 +123,18 @@ const App = () => {
     }
 
     return payload.profile || null;
-  };
+  }, []);
+
+  const fetchProfileByIdentifier = useCallback(
+    async (identifier, accessToken = "") => {
+      if (!identifier) {
+        return null;
+      }
+
+      return fetchProfileById(identifier, accessToken);
+    },
+    [fetchProfileById],
+  );
 
   const saveProfile = async ({
     name,
@@ -157,41 +171,81 @@ const App = () => {
     return payload.user || null;
   };
 
-  const handleAuthSuccess = async (user) => {
-    const authUser = {
-      name: user.name || "User",
-      email: user.email || "",
-      phone: user.phone || "",
-      image: user.image || "",
-      statusText: user.statusText || "",
-      accessToken: user.accessToken || "",
-      rememberMe: Boolean(user.rememberMe),
-    };
+  const handleAuthSuccess = useCallback(
+    async (user) => {
+      const authUser = {
+        id: user.id || "",
+        name: user.name || "User",
+        email: user.email || "",
+        phone: user.phone || "",
+        image: user.image || "",
+        statusText: user.statusText || "",
+        accessToken: user.accessToken || "",
+        rememberMe: Boolean(user.rememberMe),
+      };
 
-    if (!authUser.phone) {
-      startUserSession(authUser, authUser.rememberMe);
-      return;
-    }
+      if (!authUser.id) {
+        startUserSession(authUser, authUser.rememberMe);
+        return;
+      }
 
-    try {
-      const existingProfile = await fetchProfileByPhone(
-        authUser.phone,
-        authUser.accessToken,
-      );
+      try {
+        let existingProfile = await fetchProfileById(
+          authUser.id,
+          authUser.accessToken,
+        );
+        if (!existingProfile) {
+          const identifier = authUser.email || authUser.phone || "";
+          existingProfile = await fetchProfileByIdentifier(
+            identifier,
+            authUser.accessToken,
+          );
+        }
+        if (!existingProfile && authUser.accessToken) {
+          try {
+            await saveProfile({
+              name: authUser.name || "User",
+              image: authUser.image || "",
+              email: authUser.email || "",
+              phone: authUser.phone || "",
+              statusText: authUser.statusText || "",
+              accessToken: authUser.accessToken,
+            });
 
-      startUserSession(
-        {
-          ...authUser,
-          ...(existingProfile || {}),
-          email: authUser.email,
-          accessToken: authUser.accessToken,
-        },
-        authUser.rememberMe,
-      );
-    } catch {
-      startUserSession(authUser, authUser.rememberMe);
-    }
-  };
+            existingProfile = await fetchProfileById(
+              authUser.id,
+              authUser.accessToken,
+            );
+            if (!existingProfile) {
+              const identifier = authUser.email || authUser.phone || "";
+              existingProfile = await fetchProfileByIdentifier(
+                identifier,
+                authUser.accessToken,
+              );
+            }
+          } catch {
+            existingProfile = null;
+          }
+        }
+
+        const profileId = String(existingProfile?.id || "").trim();
+        startUserSession(
+          {
+            ...authUser,
+            ...(existingProfile || {}),
+            id: authUser.id,
+            profileId: profileId || authUser.id,
+            email: authUser.email,
+            accessToken: authUser.accessToken,
+          },
+          authUser.rememberMe,
+        );
+      } catch {
+        startUserSession(authUser, authUser.rememberMe);
+      }
+    },
+    [fetchProfileById, fetchProfileByIdentifier, startUserSession],
+  );
 
   useEffect(() => {
     const hash = String(window.location.hash || "");
@@ -236,7 +290,86 @@ const App = () => {
       .catch((error) => {
         console.error(error);
       });
-  }, [currentUser]);
+  }, [currentUser, handleAuthSuccess]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    if (!currentUser?.accessToken || currentUser?.id) {
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    const hydrateMissingIdentity = async () => {
+      try {
+        const meResponse = await fetch(`${API_BASE_URL}/auth/me`, {
+          headers: {
+            Authorization: `Bearer ${currentUser.accessToken}`,
+          },
+        });
+
+        const mePayload = await parseApiPayload(meResponse);
+        if (!meResponse.ok) {
+          throw new Error(mePayload.message || "Failed to restore session.");
+        }
+
+        const authUser = mePayload.user || {};
+        const recoveredId = String(authUser.id || "").trim();
+        if (!recoveredId) {
+          return;
+        }
+
+        let existingProfile = null;
+        try {
+          existingProfile = await fetchProfileById(
+            recoveredId,
+            currentUser.accessToken,
+          );
+          if (!existingProfile) {
+            const identifier = authUser.email || authUser.phone || "";
+            existingProfile = await fetchProfileByIdentifier(
+              identifier,
+              currentUser.accessToken,
+            );
+          }
+        } catch {
+          existingProfile = null;
+        }
+
+        if (!isMounted) {
+          return;
+        }
+
+        const profileId = String(existingProfile?.id || "").trim();
+        const nextUser = {
+          ...currentUser,
+          ...authUser,
+          ...(existingProfile || {}),
+          id: authUser.id || currentUser.id,
+          profileId: profileId || currentUser.profileId || authUser.id,
+          accessToken: currentUser.accessToken,
+        };
+
+        setCurrentUser(nextUser);
+        persistSession(nextUser, rememberMeSession);
+      } catch (error) {
+        console.error(error);
+      }
+    };
+
+    hydrateMissingIdentity();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    currentUser,
+    rememberMeSession,
+    fetchProfileById,
+    fetchProfileByIdentifier,
+    persistSession,
+  ]);
 
   const handleProfileSave = async (updates) => {
     if (!currentUser?.accessToken) {
@@ -255,6 +388,7 @@ const App = () => {
     const nextUser = {
       ...currentUser,
       ...savedProfile,
+      profileId: currentUser?.profileId || currentUser?.id,
     };
 
     setCurrentUser(nextUser);

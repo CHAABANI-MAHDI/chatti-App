@@ -46,6 +46,11 @@ function List({
     });
   }, [chats, searchTerm]);
 
+  const totalUnread = useMemo(
+    () => chats.reduce((sum, chat) => sum + Number(chat?.unread || 0), 0),
+    [chats],
+  );
+
   useEffect(() => {
     if (!currentUser) {
       return;
@@ -109,7 +114,7 @@ function List({
             <p className="text-xs text-white/70">Recent conversations</p>
           </div>
           <span className="rounded-full border border-white/20 bg-white/10 px-2 py-1 text-xs text-white/90">
-            {filteredChats.length}
+            {totalUnread > 0 ? `${totalUnread} new` : filteredChats.length}
           </span>
         </div>
 
@@ -175,8 +180,8 @@ function List({
       <AddUserByPhoneModal
         isOpen={isAddUserOpen}
         onClose={() => setIsAddUserOpen(false)}
-        existingPhones={chats.map((chat) => chat.phone)}
-        currentUserPhone={currentUser?.phone || ""}
+        existingIds={chats.map((chat) => chat.id).filter(Boolean)}
+        currentUserId={currentUser?.id || ""}
         onSearchUser={onSearchUser}
         onAddUser={onAddUser}
       />

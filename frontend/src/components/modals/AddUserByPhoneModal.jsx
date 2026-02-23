@@ -7,8 +7,8 @@ const isValidEmail = (value = "") => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 function AddUserByPhoneModal({
   isOpen,
   onClose,
-  existingPhones,
-  currentUserPhone,
+  existingIds,
+  currentUserId,
   onSearchUser,
   onAddUser,
 }) {
@@ -23,8 +23,8 @@ function AddUserByPhoneModal({
   );
 
   const alreadyAdded = useMemo(
-    () => existingPhones.includes(lookupResult?.phone || ""),
-    [existingPhones, lookupResult?.phone],
+    () => existingIds.includes(lookupResult?.id || ""),
+    [existingIds, lookupResult?.id],
   );
 
   useEffect(() => {
@@ -66,7 +66,7 @@ function AddUserByPhoneModal({
           return;
         }
 
-        if (profile.phone === currentUserPhone) {
+        if (profile.id === currentUserId) {
           setStatus("self");
           return;
         }
@@ -88,7 +88,7 @@ function AddUserByPhoneModal({
     return () => {
       isActive = false;
     };
-  }, [normalizedQuery, currentUserPhone, onSearchUser]);
+  }, [normalizedQuery, currentUserId, onSearchUser]);
 
   const profileInitial =
     lookupResult?.name?.trim()?.charAt(0)?.toUpperCase() || "U";

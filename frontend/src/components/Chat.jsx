@@ -1,4 +1,6 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { io } from "socket.io-client";
 import ChatListItem from "./chat/ChatListItem";
 import Detail from "./Detail";
 import List from "./List";
@@ -7,15 +9,9 @@ import SettingsModal from "./modals/SettingsModal";
 import UserActions from "./shared/UserActions";
 import { API_BASE_URL } from "../lib/apiBaseUrl";
 
-const POLL_INTERVAL_MS = 5000;
-
 const parseApiPayload = async (response) => {
   const text = await response.text();
-
-  if (!text) {
-    return {};
-  }
-
+  if (!text) return {};
   try {
     return JSON.parse(text);
   } catch {
@@ -24,7 +20,7 @@ const parseApiPayload = async (response) => {
 };
 
 const mapProfileToChat = (profile) => ({
-  id: profile.id || profile.phone,
+  id: profile.id || "",
   name: profile.name || "User",
   status: "Online",
   lastSeen: "Available",
@@ -40,20 +36,25 @@ const mapProfileToChat = (profile) => ({
 });
 
 const formatTime = (timestamp) => {
-  if (!timestamp) {
-    return "";
-  }
-
-  const parsedDate = new Date(timestamp);
-  if (Number.isNaN(parsedDate.getTime())) {
-    return "";
-  }
-
-  return parsedDate.toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  if (!timestamp) return "";
+  const d = new Date(timestamp);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 };
+
+const buildMessageFingerprint = (message = {}) => {
+  const rawId = String(message.id || "").trim();
+  if (rawId) return `id:${rawId}`;
+  const ts = String(
+    message.createdAt || message.rawTimestamp || message.timestamp || "",
+  ).trim();
+  const text = String(message.text || "").trim();
+  const fromMe = message.fromMe ? "1" : "0";
+  return `fallback:${ts}:${fromMe}:${text}`;
+};
+
+const isAuthExpiredMessage = (message = "") =>
+  /jwt expired|invalid jwt|token expired/i.test(String(message || ""));
 
 const mapConversationToChat = (conversation) => ({
   ...mapProfileToChat(conversation),
@@ -63,26 +64,14 @@ const mapConversationToChat = (conversation) => ({
   lastMessageAt: conversation.lastMessageAt || null,
 });
 
-const mergeChatsWithPreviousState = (previousChats = [], nextChats = []) => {
-  const previousByPhone = new Map(
-    previousChats
-      .filter((chat) => chat?.phone)
-      .map((chat) => [chat.phone, chat]),
-  );
-
-  return nextChats.map((chat) => {
-    const previous = previousByPhone.get(chat.phone);
-    return {
-      ...chat,
-      messages: previous?.messages || [],
-    };
-  });
-};
-
 function Chat({ currentUser, onLogout, onProfileSave }) {
+  const effectiveUserId = String(
+    currentUser?.profileId || currentUser?.id || "",
+  ).trim();
   const [chats, setChats] = useState([]);
   const [selectedChatId, setSelectedChatId] = useState(null);
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [socketStatus, setSocketStatus] = useState("connecting");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [mobileProfile, setMobileProfile] = useState({
     name: currentUser?.name || "My Profile",
@@ -98,107 +87,156 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
     showUnreadBadge: true,
     muteNotifications: false,
   });
-  const unreadSnapshotRef = useRef(new Map());
-  const hasLoadedConversationsRef = useRef(false);
+
+  const socketRef = useRef(null);
+  const isSendingMessageRef = useRef(false);
+  const authExpiredHandledRef = useRef(false);
+  const selectedChatIdRef = useRef(null);
+  const chatsRef = useRef([]);
+  const fetchConversationsRef = useRef(async () => {});
+  const markConversationAsReadRef = useRef(async () => {});
 
   const selectedChat = useMemo(
     () => chats.find((chat) => chat.id === selectedChatId) ?? null,
     [chats, selectedChatId],
   );
 
-  const fetchConversations = async ({ notify = false } = {}) => {
-    if (!currentUser?.phone) {
+  useEffect(() => {
+    selectedChatIdRef.current = selectedChatId;
+  }, [selectedChatId]);
+  useEffect(() => {
+    chatsRef.current = chats;
+  }, [chats]);
+
+  const handleAuthExpired = (message = "") => {
+    if (authExpiredHandledRef.current) return;
+    authExpiredHandledRef.current = true;
+    alert(message || "Session expired. Please sign in again.");
+    onLogout?.();
+  };
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const fetchConversations = async () => {
+    const ownerIdentifier = effectiveUserId;
+    if (!ownerIdentifier) {
       setChats([]);
-      unreadSnapshotRef.current = new Map();
-      hasLoadedConversationsRef.current = false;
       return;
     }
 
     const response = await fetch(
-      `${API_BASE_URL}/conversations/${encodeURIComponent(currentUser.phone)}`,
+      `${API_BASE_URL}/conversations/${encodeURIComponent(ownerIdentifier)}`,
       {
         headers: currentUser?.accessToken
-          ? {
-              Authorization: `Bearer ${currentUser.accessToken}`,
-            }
+          ? { Authorization: `Bearer ${currentUser.accessToken}` }
           : undefined,
       },
     );
 
     const payload = await parseApiPayload(response);
     if (!response.ok) {
+      if (response.status === 401 || isAuthExpiredMessage(payload.message)) {
+        handleAuthExpired(payload.message || "JWT expired");
+      }
       throw new Error(payload.message || "Failed to load conversations.");
     }
 
     const nextChats = (payload.conversations || []).map(mapConversationToChat);
 
-    setChats((previousChats) =>
-      mergeChatsWithPreviousState(previousChats, nextChats),
-    );
+    setChats((previousChats) => {
+      const previousById = new Map(
+        previousChats.filter((c) => c?.id).map((c) => [c.id, c]),
+      );
 
-    const nextUnreadMap = new Map(
-      nextChats.map((chat) => [chat.phone, Number(chat.unread || 0)]),
-    );
+      const mergedChats = nextChats.map((chat) => {
+        const previous = previousById.get(chat.id);
+        const nextTimestamp = new Date(chat.lastMessageAt || 0).getTime();
+        const previousTimestamp = new Date(
+          previous?.lastMessageAt || 0,
+        ).getTime();
+        const serverUnread = Number(chat.unread || 0);
+        const previousUnread = Number(previous?.unread || 0);
 
-    if (
-      notify &&
-      hasLoadedConversationsRef.current &&
-      "Notification" in window
-    ) {
-      for (const chat of nextChats) {
-        const previousUnread = Number(
-          unreadSnapshotRef.current.get(chat.phone) || 0,
-        );
-        const currentUnread = Number(chat.unread || 0);
-        if (
-          currentUnread > previousUnread &&
-          Notification.permission === "granted" &&
-          document.hidden
-        ) {
-          new Notification(chat.name || "New message", {
-            body: chat.lastMessage || "You received a new message.",
-          });
+        let nextUnread = serverUnread;
+        const shouldUseLocalUnread = serverUnread <= 0;
+        const hasConversationUpdated =
+          previous && nextTimestamp > previousTimestamp;
+
+        if (selectedChatId === chat.id) {
+          nextUnread = 0;
+        } else if (shouldUseLocalUnread && previous) {
+          nextUnread = hasConversationUpdated
+            ? previousUnread + 1
+            : previousUnread;
         }
-      }
-    }
 
-    unreadSnapshotRef.current = nextUnreadMap;
-    hasLoadedConversationsRef.current = true;
+        return {
+          ...chat,
+          unread: nextUnread,
+          messages: previous?.messages || [],
+        };
+      });
+
+      return mergedChats.sort(
+        (a, b) =>
+          new Date(b.lastMessageAt || 0).getTime() -
+          new Date(a.lastMessageAt || 0).getTime(),
+      );
+    });
   };
 
-  const fetchMessagesForContact = async (contactPhone) => {
-    if (!currentUser?.phone || !contactPhone) {
-      return;
-    }
+  useEffect(() => {
+    fetchConversationsRef.current = fetchConversations;
+  }, [fetchConversations]);
+
+  const fetchMessagesForContact = async (contactId) => {
+    const ownerId = effectiveUserId;
+    if (!ownerId || !contactId) return;
 
     const response = await fetch(
-      `${API_BASE_URL}/messages?ownerPhone=${encodeURIComponent(
-        currentUser.phone,
-      )}&contactPhone=${encodeURIComponent(contactPhone)}`,
+      `${API_BASE_URL}/messages?ownerId=${encodeURIComponent(ownerId)}&contactId=${encodeURIComponent(contactId)}`,
       {
         headers: currentUser?.accessToken
-          ? {
-              Authorization: `Bearer ${currentUser.accessToken}`,
-            }
+          ? { Authorization: `Bearer ${currentUser.accessToken}` }
           : undefined,
       },
     );
 
     const payload = await parseApiPayload(response);
     if (!response.ok) {
+      if (response.status === 401 || isAuthExpiredMessage(payload.message)) {
+        handleAuthExpired(payload.message || "JWT expired");
+      }
       throw new Error(payload.message || "Failed to load messages.");
     }
 
-    const mappedMessages = (payload.messages || []).map((message) => ({
-      ...message,
-      timestamp: formatTime(message.timestamp),
+    const sourceMessages = Array.isArray(payload.messages)
+      ? payload.messages
+      : [];
+    const mappedMessages = sourceMessages.map((m) => ({
+      ...m,
+      createdAt: m.timestamp || null,
+      timestamp: formatTime(m.timestamp),
     }));
 
-    setChats((previous) =>
-      previous.map((chat) =>
-        chat.phone === contactPhone
+    const latestMessage = mappedMessages[mappedMessages.length - 1] || null;
+    const latestSourceMessage =
+      sourceMessages[sourceMessages.length - 1] || null;
+
+    setChats((prev) =>
+      prev.map((chat) =>
+        chat.id === contactId
           ? {
               ...chat,
+              ...(latestMessage
+                ? {
+                    lastMessage: latestMessage.text || "",
+                    lastMessageAt:
+                      latestSourceMessage?.timestamp || chat.lastMessageAt,
+                    time:
+                      latestMessage.timestamp ||
+                      formatTime(latestSourceMessage?.timestamp),
+                  }
+                : {}),
               messages: mappedMessages,
             }
           : chat,
@@ -206,40 +244,37 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
     );
   };
 
-  const markConversationAsRead = async (contactPhone) => {
-    if (!currentUser?.phone || !contactPhone) {
-      return;
-    }
+  const markConversationAsRead = async (contactId) => {
+    const ownerId = effectiveUserId;
+    if (!ownerId || !contactId) return;
 
     const response = await fetch(`${API_BASE_URL}/messages/read`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(currentUser?.accessToken
-          ? {
-              Authorization: `Bearer ${currentUser.accessToken}`,
-            }
+          ? { Authorization: `Bearer ${currentUser.accessToken}` }
           : {}),
       },
-      body: JSON.stringify({
-        ownerPhone: currentUser.phone,
-        contactPhone,
-      }),
+      body: JSON.stringify({ ownerId, contactId }),
     });
 
     const payload = await parseApiPayload(response);
     if (!response.ok) {
+      if (response.status === 401 || isAuthExpiredMessage(payload.message)) {
+        handleAuthExpired(payload.message || "JWT expired");
+      }
       throw new Error(payload.message || "Failed to mark messages as read.");
     }
 
-    setChats((previous) =>
-      previous.map((chat) =>
-        chat.phone === contactPhone
+    setChats((prev) =>
+      prev.map((chat) =>
+        chat.id === contactId
           ? {
               ...chat,
               unread: 0,
-              messages: (chat.messages || []).map((message) =>
-                !message.fromMe ? { ...message, read: true } : message,
+              messages: (chat.messages || []).map((m) =>
+                !m.fromMe ? { ...m, read: true } : m,
               ),
             }
           : chat,
@@ -248,54 +283,28 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
   };
 
   useEffect(() => {
-    let isMounted = true;
+    markConversationAsReadRef.current = markConversationAsRead;
+  }, [markConversationAsRead]);
 
+  useEffect(() => {
+    let isMounted = true;
     const load = async () => {
       try {
-        await fetchConversations({ notify: false });
+        await fetchConversations();
       } catch (error) {
-        if (isMounted) {
-          console.error(error);
-        }
+        if (isMounted) console.error(error);
       }
     };
-
     load();
-
     return () => {
       isMounted = false;
     };
-  }, [currentUser?.phone, currentUser?.accessToken]);
+  }, [currentUser?.id, currentUser?.accessToken]);
 
   useEffect(() => {
-    if (!currentUser?.phone) {
-      return;
-    }
-
-    const timer = window.setInterval(() => {
-      fetchConversations({ notify: true })
-        .then(async () => {
-          if (selectedChat?.phone) {
-            await fetchMessagesForContact(selectedChat.phone);
-            await markConversationAsRead(selectedChat.phone);
-          }
-        })
-        .catch((error) => console.error(error));
-    }, POLL_INTERVAL_MS);
-
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [currentUser?.phone, currentUser?.accessToken, selectedChat?.phone]);
-
-  useEffect(() => {
-    if (!("Notification" in window)) {
-      return;
-    }
-
-    if (Notification.permission === "default") {
+    if (!("Notification" in window)) return;
+    if (Notification.permission === "default")
       Notification.requestPermission().catch(() => null);
-    }
   }, []);
 
   useEffect(() => {
@@ -303,43 +312,155 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
       setSelectedChatId(null);
       return;
     }
-
-    const chatStillSelected = chats.some((chat) => chat.id === selectedChatId);
-    if (!chatStillSelected) {
-      setSelectedChatId(chats[0].id);
-    }
+    const stillSelected = chats.some((c) => c.id === selectedChatId);
+    if (!stillSelected) setSelectedChatId(chats[0].id);
   }, [chats, selectedChatId]);
 
   useEffect(() => {
-    if (!selectedChat?.phone || !currentUser?.phone) {
-      return;
-    }
-
-    fetchMessagesForContact(selectedChat.phone).catch((error) =>
-      console.error(error),
-    );
-    markConversationAsRead(selectedChat.phone).catch((error) =>
-      console.error(error),
-    );
-  }, [selectedChat?.phone, currentUser?.phone, currentUser?.accessToken]);
+    if (!selectedChat?.id || !effectiveUserId) return;
+    fetchMessagesForContact(selectedChat.id).catch(console.error);
+    markConversationAsRead(selectedChat.id).catch(console.error);
+  }, [selectedChat?.id, effectiveUserId, currentUser?.accessToken]);
 
   useEffect(() => {
-    if (!currentUser) {
-      return;
-    }
+    const userId = effectiveUserId;
+    if (!userId) return;
 
-    setMobileProfile((previous) => ({
-      ...previous,
-      name: currentUser.name || previous.name,
-      email: currentUser.email || previous.email,
-      statusText: currentUser.statusText || previous.statusText,
-      image: currentUser.image || previous.image,
+    setSocketStatus("connecting");
+    const socket = io(API_BASE_URL, {
+      transports: ["websocket", "polling"],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 500,
+      reconnectionDelayMax: 4000,
+    });
+    socketRef.current = socket;
+
+    const handleConnected = () => {
+      setSocketStatus("connected");
+      socket.emit("chat:join-user", { userId });
+    };
+    const handleDisconnected = () => {
+      setSocketStatus("disconnected");
+    };
+    const handleReconnectAttempt = () => {
+      setSocketStatus("reconnecting");
+    };
+    const handleConnectError = () => {
+      setSocketStatus("error");
+    };
+
+    const handleIncomingMessage = async (event = {}) => {
+      const senderId = String(event.senderId || "").trim();
+      const receiverId = String(event.receiverId || "").trim();
+      if (!senderId || !receiverId) return;
+      if (senderId !== userId && receiverId !== userId) return;
+
+      const contactId = senderId === userId ? receiverId : senderId;
+      const incomingTimestamp = event.timestamp || new Date().toISOString();
+      const isFromMe = senderId === userId;
+      let chatExists = false;
+
+      setChats((previous) => {
+        const updated = previous.map((chat) => {
+          if (chat.id !== contactId) return chat;
+          chatExists = true;
+
+          const incomingMessage = {
+            id: event.id || null,
+            text: String(event.text || ""),
+            timestamp: formatTime(incomingTimestamp),
+            createdAt: incomingTimestamp,
+            fromMe: isFromMe,
+            read: isFromMe,
+            readAt: null,
+          };
+
+          const fp = buildMessageFingerprint(incomingMessage);
+          const alreadyExists = (chat.messages || []).some(
+            (m) => buildMessageFingerprint(m) === fp,
+          );
+
+          const nextMessages = alreadyExists
+            ? chat.messages || []
+            : [...(chat.messages || []), incomingMessage];
+
+          const shouldIncrementUnread =
+            !isFromMe &&
+            selectedChatIdRef.current !== contactId &&
+            !alreadyExists;
+
+          return {
+            ...chat,
+            lastMessage: String(event.text || ""),
+            lastMessageAt: incomingTimestamp,
+            time: formatTime(incomingTimestamp),
+            unread: shouldIncrementUnread ? Number(chat.unread || 0) + 1 : 0,
+            messages: nextMessages,
+          };
+        });
+
+        return updated.sort(
+          (a, b) =>
+            new Date(b.lastMessageAt || 0).getTime() -
+            new Date(a.lastMessageAt || 0).getTime(),
+        );
+      });
+
+      if (!chatExists) await fetchConversationsRef.current();
+      if (!isFromMe && selectedChatIdRef.current === contactId)
+        await markConversationAsReadRef.current(contactId);
+
+      if (
+        !isFromMe &&
+        selectedChatIdRef.current !== contactId &&
+        "Notification" in window &&
+        Notification.permission === "granted" &&
+        document.hidden
+      ) {
+        const label =
+          chatsRef.current.find((c) => c.id === contactId)?.name ||
+          "New message";
+        new Notification(label, {
+          body: String(event.text || "You received a new message."),
+        });
+      }
+    };
+
+    socket.on("connect", handleConnected);
+    socket.on("disconnect", handleDisconnected);
+    socket.io.on("reconnect_attempt", handleReconnectAttempt);
+    socket.io.on("reconnect", handleConnected);
+    socket.on("connect_error", handleConnectError);
+    socket.on("chat:message:new", handleIncomingMessage);
+    if (socket.connected) handleConnected();
+
+    return () => {
+      socket.off("connect", handleConnected);
+      socket.off("disconnect", handleDisconnected);
+      socket.io.off("reconnect_attempt", handleReconnectAttempt);
+      socket.io.off("reconnect", handleConnected);
+      socket.off("connect_error", handleConnectError);
+      socket.off("chat:message:new", handleIncomingMessage);
+      socket.disconnect();
+      socketRef.current = null;
+      setSocketStatus("disconnected");
+    };
+  }, [effectiveUserId]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    setMobileProfile((prev) => ({
+      ...prev,
+      name: currentUser.name || prev.name,
+      email: currentUser.email || prev.email,
+      statusText: currentUser.statusText || prev.statusText,
+      image: currentUser.image || prev.image,
     }));
   }, [currentUser]);
 
   const mobileProfileSubtitle =
     mobileProfile.statusText?.trim() || mobileProfile.email || "No bio yet";
-
   const mobileProfileInitial =
     mobileProfile.name?.trim()?.charAt(0)?.toUpperCase() || "U";
 
@@ -350,19 +471,15 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
 
   const handleMobileImageUpload = (event) => {
     const file = event.target.files?.[0];
-
-    if (!file) {
-      return;
-    }
-
-    const fileReader = new FileReader();
-    fileReader.onload = () => {
-      setMobileDraftProfile((previous) => ({
-        ...previous,
-        image: typeof fileReader.result === "string" ? fileReader.result : "",
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setMobileDraftProfile((prev) => ({
+        ...prev,
+        image: typeof reader.result === "string" ? reader.result : "",
       }));
     };
-    fileReader.readAsDataURL(file);
+    reader.readAsDataURL(file);
   };
 
   const saveMobileProfile = async () => {
@@ -377,23 +494,20 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
 
   const searchUserByNameOrEmail = async (query) => {
     const response = await fetch(
-      `${API_BASE_URL}/profiles/search?query=${encodeURIComponent(
-        query,
-      )}&excludePhone=${encodeURIComponent(currentUser?.phone || "")}`,
+      `${API_BASE_URL}/profiles/search?query=${encodeURIComponent(query)}&excludeId=${encodeURIComponent(effectiveUserId)}`,
       {
         headers: currentUser?.accessToken
-          ? {
-              Authorization: `Bearer ${currentUser.accessToken}`,
-            }
+          ? { Authorization: `Bearer ${currentUser.accessToken}` }
           : undefined,
       },
     );
-
     const payload = await parseApiPayload(response);
     if (!response.ok) {
+      if (response.status === 401 || isAuthExpiredMessage(payload.message)) {
+        handleAuthExpired(payload.message || "JWT expired");
+      }
       throw new Error(payload.message || "Failed to find user.");
     }
-
     return payload.profile || null;
   };
 
@@ -403,41 +517,42 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
       headers: {
         "Content-Type": "application/json",
         ...(currentUser?.accessToken
-          ? {
-              Authorization: `Bearer ${currentUser.accessToken}`,
-            }
+          ? { Authorization: `Bearer ${currentUser.accessToken}` }
           : {}),
       },
       body: JSON.stringify({
-        ownerPhone: currentUser?.phone,
-        contactPhone: profile?.phone,
+        ownerId: effectiveUserId,
+        contactId: profile?.id,
       }),
     });
-
     const payload = await parseApiPayload(response);
     if (!response.ok) {
+      if (response.status === 401 || isAuthExpiredMessage(payload.message)) {
+        handleAuthExpired(payload.message || "JWT expired");
+      }
       throw new Error(payload.message || "Failed to add user.");
     }
 
     const nextChat = mapProfileToChat(payload.contact || profile);
-
-    setChats((previous) => {
-      const exists = previous.some((chat) => chat.phone === nextChat.phone);
-      if (exists) {
-        return previous;
-      }
-
-      return [nextChat, ...previous];
+    setChats((prev) => {
+      if (prev.some((c) => c.id === nextChat.id)) return prev;
+      return [nextChat, ...prev];
     });
-
     setSelectedChatId(nextChat.id);
   };
 
-  const handleSendMessage = async (chat, text) => {
-    if (!chat?.phone || !currentUser?.phone) {
-      return;
-    }
+  const handleSelectChat = (chatId) => {
+    setSelectedChatId(chatId);
+    setChats((prev) =>
+      prev.map((c) => (c.id === chatId ? { ...c, unread: 0 } : c)),
+    );
+  };
 
+  const handleSendMessage = async (chat, text) => {
+    if (!chat?.id || !effectiveUserId) return;
+    if (isSendingMessageRef.current) return;
+
+    isSendingMessageRef.current = true;
     setSendingMessage(true);
     try {
       const response = await fetch(`${API_BASE_URL}/messages`, {
@@ -445,36 +560,39 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
         headers: {
           "Content-Type": "application/json",
           ...(currentUser?.accessToken
-            ? {
-                Authorization: `Bearer ${currentUser.accessToken}`,
-              }
+            ? { Authorization: `Bearer ${currentUser.accessToken}` }
             : {}),
         },
         body: JSON.stringify({
-          senderPhone: currentUser.phone,
-          receiverPhone: chat.phone,
+          senderId: effectiveUserId,
+          receiverId: chat.id,
           text,
         }),
       });
 
       const payload = await parseApiPayload(response);
       if (!response.ok) {
+        if (response.status === 401 || isAuthExpiredMessage(payload.message)) {
+          handleAuthExpired(payload.message || "JWT expired");
+        }
         throw new Error(payload.message || "Failed to send message.");
       }
 
       const nextMessage = {
         ...(payload.message || {}),
+        createdAt: payload.message?.timestamp || new Date().toISOString(),
         timestamp: formatTime(
           payload.message?.timestamp || new Date().toISOString(),
         ),
       };
+      const fp = buildMessageFingerprint(nextMessage);
 
-      setChats((previous) => {
-        const updated = previous.map((item) => {
-          if (item.phone !== chat.phone) {
-            return item;
-          }
-
+      setChats((prev) => {
+        const updated = prev.map((item) => {
+          if (item.id !== chat.id) return item;
+          const alreadyExists = (item.messages || []).some(
+            (m) => buildMessageFingerprint(m) === fp,
+          );
           return {
             ...item,
             lastMessage: text,
@@ -484,25 +602,30 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
               payload.message?.timestamp || new Date().toISOString(),
             ),
             unread: 0,
-            messages: [...(item.messages || []), nextMessage],
+            messages: alreadyExists
+              ? item.messages || []
+              : [...(item.messages || []), nextMessage],
           };
         });
-
-        return updated.sort((first, second) => {
-          const firstTime = new Date(first.lastMessageAt || 0).getTime();
-          const secondTime = new Date(second.lastMessageAt || 0).getTime();
-          return secondTime - firstTime;
-        });
+        return updated.sort(
+          (a, b) =>
+            new Date(b.lastMessageAt || 0).getTime() -
+            new Date(a.lastMessageAt || 0).getTime(),
+        );
       });
     } finally {
+      isSendingMessageRef.current = false;
       setSendingMessage(false);
     }
   };
 
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <>
+      {/* ════════════════ MOBILE layout ════════════════ */}
       <div className="flex h-full w-full flex-col overflow-hidden rounded-3xl border border-white/25 bg-[#132219]/75 text-white shadow-2xl backdrop-blur-2xl md:hidden">
-        <div className="flex items-center gap-2 border-b border-white/15 bg-[#0d1712]/80 px-4 py-3">
+        {/* Top bar */}
+        <div className="shrink-0 flex items-center gap-2 border-b border-white/15 bg-[#0d1712]/80 px-4 py-3">
           <button
             type="button"
             onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -531,13 +654,14 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
           </span>
         </div>
 
+        {/* Slide-out sidebar */}
         <div
           className={`fixed inset-y-0 left-0 z-40 w-[82%] max-w-[320px] border-r border-white/15 bg-[#0f1a14]/95 backdrop-blur-xl transition-transform duration-300 md:hidden ${
             sidebarOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
           <div className="flex h-full flex-col">
-            <div className="flex items-center justify-between border-b border-white/15 p-4">
+            <div className="shrink-0 flex items-center justify-between border-b border-white/15 p-4">
               <h3 className="font-semibold text-white">Chats</h3>
               <button
                 type="button"
@@ -560,10 +684,10 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
               </button>
             </div>
 
-            <div className="mx-3 mt-3 mb-2 rounded-2xl border border-white/15 bg-black/20 p-2.5">
+            <div className="mx-3 mt-3 mb-2 shrink-0 rounded-2xl border border-white/15 bg-black/20 p-2.5">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2.5">
-                  <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-white/25 text-sm font-semibold text-white">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white/25 text-sm font-semibold text-white">
                     {mobileProfile.image ? (
                       <img
                         src={mobileProfile.image}
@@ -583,7 +707,6 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
                     </p>
                   </div>
                 </div>
-
                 <UserActions
                   onProfile={openMobileProfileEditor}
                   onSettings={() => setIsMobileSettingsOpen(true)}
@@ -603,7 +726,7 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
                     chat={chat}
                     isActive={chat.id === selectedChatId}
                     onClick={() => {
-                      setSelectedChatId(chat.id);
+                      handleSelectChat(chat.id);
                       setSidebarOpen(false);
                     }}
                     showMessagePreview={mobilePreferences.showMessagePreview}
@@ -643,20 +766,27 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
           containerClassName="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm md:hidden"
         />
 
-        <div className="min-h-0 flex-1">
+        {/* CRITICAL FIX: min-h-0 + overflow-hidden so Detail can scroll
+            internally without the wrapper growing beyond the screen */}
+        <div className="min-h-0 flex-1 overflow-hidden">
           <Detail
             chat={selectedChat}
             onSendMessage={handleSendMessage}
             sendingMessage={sendingMessage}
+             socketStatus={socketStatus}
           />
         </div>
       </div>
 
-      <div className="hidden h-full w-full overflow-hidden rounded-3xl border border-white/25 bg-[#132219]/75 text-white shadow-2xl backdrop-blur-2xl md:grid md:grid-cols-[320px_minmax(0,1fr)] lg:grid-cols-[360px_minmax(0,1fr)]">
+      {/* ════════════════ DESKTOP layout ════════════════ */}
+      {/* CRITICAL FIX: min-h-0 tells the grid to respect its flex-parent's
+          height instead of growing to fit content. minmax(0,1fr) on the
+          Detail column already prevents horizontal overflow. */}
+      <div className="hidden min-h-0 h-full w-full overflow-hidden rounded-3xl border border-white/25 bg-[#132219]/75 text-white shadow-2xl backdrop-blur-2xl md:grid md:grid-cols-[320px_minmax(0,1fr)] lg:grid-cols-[360px_minmax(0,1fr)]">
         <List
           chats={chats}
           selectedChatId={selectedChatId}
-          onSelectChat={setSelectedChatId}
+          onSelectChat={handleSelectChat}
           currentUser={currentUser}
           onLogout={onLogout}
           onProfileSave={onProfileSave}
@@ -667,6 +797,7 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
           chat={selectedChat}
           onSendMessage={handleSendMessage}
           sendingMessage={sendingMessage}
+           socketStatus={socketStatus}
         />
       </div>
     </>

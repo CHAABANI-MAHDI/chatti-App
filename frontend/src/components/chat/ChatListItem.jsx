@@ -54,7 +54,7 @@ function ChatListItem({
             <p
               className={`truncate text-white/65 ${isMobile ? "text-xs" : "text-sm text-white/80"}`}
             >
-              {chat.lastMessage}
+              {chat.lastMessage || "No messages yet"}
             </p>
           )}
         </div>
@@ -65,7 +65,7 @@ function ChatListItem({
               isMobile ? "px-2 py-0.5 text-[10px]" : "px-2 py-0.5 text-xs"
             }`}
           >
-            {chat.unread}
+            {chat.unread > 99 ? "99+" : chat.unread}
           </span>
         )}
       </div>
