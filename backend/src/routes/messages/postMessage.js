@@ -16,6 +16,7 @@ const registerPostMessageRoute = (app, ctx) => {
     const rawSenderId = String(req.body?.senderId || "").trim();
     const rawReceiverId = String(req.body?.receiverId || "").trim();
     const body = String(req.body?.text || "").trim();
+    const rawImageDataUrl = String(req.body?.imageDataUrl || "").trim();
 
     const hasSenderId = isUuid(rawSenderId);
     const hasReceiverId = isUuid(rawReceiverId);
@@ -32,8 +33,10 @@ const registerPostMessageRoute = (app, ctx) => {
       });
     }
 
-    if (!body) {
-      return res.status(400).json({ message: "Message text is required." });
+    if (!body && !rawImageDataUrl) {
+      return res.status(400).json({
+        message: "Message text or image is required.",
+      });
     }
 
     if (rawSenderId === rawReceiverId) {
@@ -267,16 +270,74 @@ const registerPostMessageRoute = (app, ctx) => {
       }
     }
 
+    const profileWriteClient = ctx.supabaseServiceClient || profileClient;
+    const parsedImage = rawImageDataUrl
+      ? ctx.parseImageDataUrl(rawImageDataUrl)
+      : null;
+
+    if (rawImageDataUrl && !parsedImage) {
+      return res.status(400).json({
+        message: "Invalid image payload. Expected a valid image data URL.",
+      });
+    }
+
+    if (parsedImage && parsedImage.buffer.length > 6 * 1024 * 1024) {
+      return res.status(400).json({
+        message: "Image is too large. Max allowed size is 6MB.",
+      });
+    }
+
+    let storedImagePath = "";
+
+    if (parsedImage) {
+      const fileExtension = ctx.extensionFromMime(parsedImage.mimeType);
+      const filePath = `${senderProfileId}/messages/${conversationId}/${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 10)}.${fileExtension}`;
+
+      const { error: uploadError } = await profileWriteClient.storage
+        .from(ctx.storageBucket)
+        .upload(filePath, parsedImage.buffer, {
+          contentType: parsedImage.mimeType,
+          upsert: false,
+        });
+
+      if (uploadError) {
+        return res.status(500).json({
+          message: uploadError.message || "Failed to upload image.",
+        });
+      }
+
+      storedImagePath = filePath;
+    }
+
+    const storedBody = messageColumns.imageColumn
+      ? body
+      : ctx.encodeInlineImageMessageBody(body, storedImagePath);
+
+    const insertPayload = {
+      conversation_id: conversationId,
+      [messageColumns.senderColumn]: senderMessageSenderValue,
+      [messageColumns.bodyColumn]: storedBody,
+    };
+
+    if (messageColumns.imageColumn) {
+      insertPayload[messageColumns.imageColumn] = storedImagePath || null;
+    }
+
+    const selectedColumns = [
+      "id",
+      messageColumns.senderColumn,
+      "conversation_id",
+      messageColumns.bodyColumn,
+      "created_at",
+      ...(messageColumns.imageColumn ? [messageColumns.imageColumn] : []),
+    ];
+
     const { data, error } = await profileClient
       .from(ctx.messagesTable)
-      .insert({
-        conversation_id: conversationId,
-        [messageColumns.senderColumn]: senderMessageSenderValue,
-        [messageColumns.bodyColumn]: body,
-      })
-      .select(
-        `id, ${messageColumns.senderColumn}, conversation_id, ${messageColumns.bodyColumn}, created_at`,
-      )
+      .insert(insertPayload)
+      .select(selectedColumns.join(", "))
       .single();
 
     if (error) {
@@ -285,10 +346,24 @@ const registerPostMessageRoute = (app, ctx) => {
       });
     }
 
+    const decodedBody = ctx.decodeInlineImageMessageBody(
+      String(data?.[messageColumns.bodyColumn] || ""),
+    );
+    const resolvedImagePath = messageColumns.imageColumn
+      ? String(data?.[messageColumns.imageColumn] || "").trim()
+      : decodedBody.imagePath;
+    const resolvedImageUrl = resolvedImagePath
+      ? await ctx.resolveAvatarForClient(resolvedImagePath, profileWriteClient)
+      : "";
+    const resolvedText = messageColumns.imageColumn
+      ? String(data?.[messageColumns.bodyColumn] || "")
+      : decodedBody.text;
+
     if (typeof ctx.emitMessageCreated === "function") {
       ctx.emitMessageCreated({
         id: data?.id || null,
-        text: String(data?.[messageColumns.bodyColumn] || ""),
+        text: resolvedText,
+        imageUrl: resolvedImageUrl,
         timestamp: data?.created_at || null,
         senderId: senderProfileId,
         receiverId: receiverProfileId,
@@ -299,7 +374,8 @@ const registerPostMessageRoute = (app, ctx) => {
     return res.status(201).json({
       message: {
         id: data?.id || null,
-        text: String(data?.[messageColumns.bodyColumn] || ""),
+        text: resolvedText,
+        imageUrl: resolvedImageUrl,
         timestamp: data?.created_at || null,
         fromMe: true,
         senderPhone: ctx.formatPhoneFromDb(senderPhoneFromDb),

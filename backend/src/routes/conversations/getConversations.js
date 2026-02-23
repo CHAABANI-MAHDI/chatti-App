@@ -148,11 +148,18 @@ const registerGetConversationsRoute = (app, ctx) => {
       messageColumns.senderColumn,
     );
 
+    const selectedColumns = [
+      "id",
+      messageColumns.senderColumn,
+      "conversation_id",
+      messageColumns.bodyColumn,
+      "created_at",
+      ...(messageColumns.imageColumn ? [messageColumns.imageColumn] : []),
+    ];
+
     const { data: messageRows, error: messagesError } = await profileClient
       .from(ctx.messagesTable)
-      .select(
-        `id, ${messageColumns.senderColumn}, conversation_id, ${messageColumns.bodyColumn}, created_at`,
-      )
+      .select(selectedColumns.join(", "))
       .in("conversation_id", conversationIds)
       .order("created_at", { ascending: false })
       .limit(5000);
@@ -203,10 +210,20 @@ const registerGetConversationsRoute = (app, ctx) => {
             profileRecord,
             profileClient,
           );
+          const latestBody = String(
+            latestMessage?.[messageColumns.bodyColumn] || "",
+          );
+          const decodedBody = ctx.decodeInlineImageMessageBody(latestBody);
+          const latestImagePath = messageColumns.imageColumn
+            ? String(latestMessage?.[messageColumns.imageColumn] || "").trim()
+            : decodedBody.imagePath;
+          const latestText = messageColumns.imageColumn
+            ? latestBody
+            : decodedBody.text;
 
           return {
             ...baseProfile,
-            lastMessage: latestMessage?.[messageColumns.bodyColumn] || "",
+            lastMessage: latestText || (latestImagePath ? "📷 Photo" : ""),
             lastMessageAt: latestMessage?.created_at || null,
             lastMessageFromMe:
               latestMessage?.[messageColumns.senderColumn] ===

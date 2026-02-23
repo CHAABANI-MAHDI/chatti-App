@@ -32,7 +32,15 @@ function ChatListItem({
             isMobile ? "h-11 w-11" : "h-10 w-10"
           }`}
         >
-          <span>{chat.avatar}</span>
+          {chat.image ? (
+            <img
+              src={chat.image}
+              alt={chat.name || "User"}
+              className="h-full w-full rounded-full object-cover"
+            />
+          ) : (
+            <span>{chat.avatar}</span>
+          )}
           <span
             className={`absolute -bottom-0.5 -right-0.5 rounded-full border ${
               isMobile

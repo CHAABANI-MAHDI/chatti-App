@@ -47,6 +47,10 @@ const buildContext = () => {
   let messageBodyColumnCache = String(process.env.MESSAGE_BODY_COLUMN || "")
     .trim()
     .toLowerCase();
+  let messageImageColumnCache = String(process.env.MESSAGE_IMAGE_COLUMN || "")
+    .trim()
+    .toLowerCase();
+  const inlineImageMessagePrefix = "__relatime_image__:";
 
   const getBearerToken = (req) => {
     const rawHeader = String(req.headers?.authorization || "").trim();
@@ -377,6 +381,42 @@ const buildContext = () => {
     return map[mimeType] || "jpg";
   };
 
+  const encodeInlineImageMessageBody = (text = "", imagePath = "") => {
+    const normalizedText = String(text || "").trim();
+    const normalizedImagePath = String(imagePath || "").trim();
+
+    if (!normalizedImagePath) {
+      return normalizedText;
+    }
+
+    return `${inlineImageMessagePrefix}${normalizedImagePath}\n${normalizedText}`;
+  };
+
+  const decodeInlineImageMessageBody = (rawBody = "") => {
+    const bodyValue = String(rawBody || "");
+    if (!bodyValue.startsWith(inlineImageMessagePrefix)) {
+      return {
+        text: bodyValue,
+        imagePath: "",
+      };
+    }
+
+    const payload = bodyValue.slice(inlineImageMessagePrefix.length);
+    const newlineIndex = payload.indexOf("\n");
+
+    if (newlineIndex < 0) {
+      return {
+        text: "",
+        imagePath: payload.trim(),
+      };
+    }
+
+    return {
+      imagePath: payload.slice(0, newlineIndex).trim(),
+      text: payload.slice(newlineIndex + 1),
+    };
+  };
+
   const resolveRequesterId = async (req) => {
     const accessToken = getBearerToken(req);
     if (!accessToken || !supabaseAnonKey) {
@@ -565,10 +605,16 @@ const buildContext = () => {
   };
 
   const resolveMessageColumns = async (profileClient) => {
-    if (messageSenderColumnCache && messageBodyColumnCache) {
+    if (
+      messageSenderColumnCache &&
+      messageBodyColumnCache &&
+      messageImageColumnCache !== ""
+    ) {
       return {
         senderColumn: messageSenderColumnCache,
         bodyColumn: messageBodyColumnCache,
+        imageColumn:
+          messageImageColumnCache === "__none__" ? "" : messageImageColumnCache,
       };
     }
 
@@ -578,6 +624,7 @@ const buildContext = () => {
       return {
         senderColumn: "sender_id",
         bodyColumn: "body",
+        imageColumn: "",
       };
     }
 
@@ -607,9 +654,28 @@ const buildContext = () => {
       }
     }
 
+    if (messageImageColumnCache === "") {
+      for (const candidate of ["image_url", "media_url", "attachment_url"]) {
+        const { error } = await safeClient
+          .from(messagesTable)
+          .select(candidate)
+          .limit(1);
+        if (!error) {
+          messageImageColumnCache = candidate;
+          break;
+        }
+      }
+
+      if (!messageImageColumnCache) {
+        messageImageColumnCache = "__none__";
+      }
+    }
+
     return {
       senderColumn: messageSenderColumnCache || "sender_id",
       bodyColumn: messageBodyColumnCache || "body",
+      imageColumn:
+        messageImageColumnCache === "__none__" ? "" : messageImageColumnCache,
     };
   };
 
@@ -654,6 +720,8 @@ const buildContext = () => {
     mapAuthUserForClient,
     parseImageDataUrl,
     extensionFromMime,
+    encodeInlineImageMessageBody,
+    decodeInlineImageMessageBody,
     resolveRequesterId,
     resolveAuthenticatedUser,
     resolveOwnerProfile,

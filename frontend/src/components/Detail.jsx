@@ -9,10 +9,13 @@ function Detail({
 }) {
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const [messageText, setMessageText] = useState("");
+  const [pendingImageDataUrl, setPendingImageDataUrl] = useState("");
+  const [pendingImageName, setPendingImageName] = useState("");
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   const [newMessageCount, setNewMessageCount] = useState(0);
   const messagesContainerRef = useRef(null);
   const inputRef = useRef(null);
+  const imageInputRef = useRef(null);
   const shouldAutoScrollRef = useRef(true);
   const lastHandledMessageKeyRef = useRef("");
 
@@ -23,6 +26,8 @@ function Detail({
   useEffect(() => {
     setIsInfoOpen(false);
     setMessageText("");
+    setPendingImageDataUrl("");
+    setPendingImageName("");
     setIsEmojiPickerOpen(false);
     setNewMessageCount(0);
     shouldAutoScrollRef.current = true;
@@ -51,7 +56,7 @@ function Detail({
     const node = messagesContainerRef.current;
     if (!node) return;
 
-    const nextKey = `${lastMessage.id || ""}:${lastMessage.timestamp || ""}:${lastMessage.text || ""}:${lastMessage.fromMe ? "1" : "0"}`;
+    const nextKey = `${lastMessage.id || ""}:${lastMessage.timestamp || ""}:${lastMessage.text || ""}:${lastMessage.imageUrl || ""}:${lastMessage.fromMe ? "1" : "0"}`;
     if (lastHandledMessageKeyRef.current === nextKey) return;
     lastHandledMessageKeyRef.current = nextKey;
 
@@ -70,16 +75,58 @@ function Detail({
     }
   }, [chat?.id, lastMessage]);
 
+  const clearPendingImage = () => {
+    setPendingImageDataUrl("");
+    setPendingImageName("");
+    if (imageInputRef.current) {
+      imageInputRef.current.value = "";
+    }
+  };
+
+  const handlePickImage = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (
+      !String(file.type || "")
+        .toLowerCase()
+        .startsWith("image/")
+    ) {
+      alert("Please choose a valid image file.");
+      clearPendingImage();
+      return;
+    }
+
+    if (file.size > 6 * 1024 * 1024) {
+      alert("Image is too large. Max allowed size is 6MB.");
+      clearPendingImage();
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setPendingImageDataUrl(
+        typeof reader.result === "string" ? reader.result : "",
+      );
+      setPendingImageName(file.name || "image");
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleEmojiSelect = (emojiData) => {
     setMessageText((prev) => `${prev}${emojiData.emoji}`);
   };
 
   const handleSend = async () => {
     const text = messageText.trim();
-    if (!text || !chat || sendingMessage) return;
+    if ((!text && !pendingImageDataUrl) || !chat || sendingMessage) return;
     try {
-      await onSendMessage?.(chat, text);
+      await onSendMessage?.(chat, {
+        text,
+        imageDataUrl: pendingImageDataUrl,
+      });
       setMessageText("");
+      clearPendingImage();
       setIsEmojiPickerOpen(false);
       window.requestAnimationFrame(() => {
         inputRef.current?.focus();
@@ -154,7 +201,26 @@ function Detail({
                     : "mr-auto bg-white/25"
                 }`}
               >
-                <p>{message.text}</p>
+                {message.imageUrl ? (
+                  <a
+                    href={message.imageUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block"
+                  >
+                    <img
+                      src={message.imageUrl}
+                      alt="Shared"
+                      className="max-h-72 w-full min-w-[180px] rounded-xl object-cover"
+                      loading="lazy"
+                    />
+                  </a>
+                ) : null}
+                {message.text ? (
+                  <p className={message.imageUrl ? "mt-2" : ""}>
+                    {message.text}
+                  </p>
+                ) : null}
                 <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-white/65">
                   {!message.fromMe && !message.read && (
                     <span className="rounded-full border border-white/25 bg-white/10 px-2 py-0.5 text-[9px] uppercase tracking-wide text-white/80">
@@ -234,10 +300,18 @@ function Detail({
 
       {/* Input bar — shrink-0 keeps it fixed at the bottom regardless of message count */}
       <div className="relative shrink-0 flex items-center gap-2 rounded-2xl border border-white/20 bg-white/12 p-2">
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handlePickImage}
+        />
         <button
           type="button"
           title="Send image"
-          className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/20 bg-white/10 text-white/90 transition-colors hover:bg-white/15 sm:flex"
+          onClick={() => imageInputRef.current?.click()}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/20 bg-white/10 text-white/90 transition-colors hover:bg-white/15"
         >
           <svg
             className="h-4 w-4"
@@ -358,6 +432,33 @@ function Detail({
         )}
       </div>
 
+      {pendingImageDataUrl ? (
+        <div className="mt-2 rounded-xl border border-white/20 bg-black/25 p-2">
+          <div className="flex items-start gap-3">
+            <img
+              src={pendingImageDataUrl}
+              alt="Selected"
+              className="h-20 w-20 rounded-lg object-cover"
+            />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs text-white/85">
+                {pendingImageName || "Selected image"}
+              </p>
+              <p className="text-[11px] text-white/60">
+                This image will be uploaded when you send.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={clearPendingImage}
+              className="rounded-md border border-white/25 bg-white/10 px-2 py-1 text-[11px] text-white/85 hover:bg-white/15"
+            >
+              Remove
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <p className="px-1 text-[11px] text-white/65 md:hidden">
         Type your message, then tap Send.
       </p>
@@ -412,8 +513,16 @@ function Detail({
         {/* Header — shrink-0 so it never collapses */}
         <header className="mb-4 shrink-0 flex items-center justify-between gap-2 rounded-2xl border border-white/20 bg-white/12 px-4 py-3 md:px-5">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/30 text-base font-semibold text-white">
-              {avatarInitial}
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white/30 text-base font-semibold text-white">
+              {chat.image ? (
+                <img
+                  src={chat.image}
+                  alt={chat.name || "User"}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                avatarInitial
+              )}
             </div>
             <div className="min-w-0">
               <h2 className="truncate text-lg font-semibold tracking-tight text-white">

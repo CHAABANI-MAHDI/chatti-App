@@ -50,8 +50,23 @@ const buildMessageFingerprint = (message = {}) => {
     message.createdAt || message.rawTimestamp || message.timestamp || "",
   ).trim();
   const text = String(message.text || "").trim();
+  const imageUrl = String(message.imageUrl || "").trim();
   const fromMe = message.fromMe ? "1" : "0";
-  return `fallback:${ts}:${fromMe}:${text}`;
+  return `fallback:${ts}:${fromMe}:${text}:${imageUrl}`;
+};
+
+const normalizeOutgoingMessageInput = (payload) => {
+  if (typeof payload === "string") {
+    return {
+      text: payload,
+      imageDataUrl: "",
+    };
+  }
+
+  return {
+    text: String(payload?.text || ""),
+    imageDataUrl: String(payload?.imageDataUrl || ""),
+  };
 };
 
 const isAuthExpiredMessage = (message = "") =>
@@ -403,6 +418,7 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
           const incomingMessage = {
             id: event.id || null,
             text: String(event.text || ""),
+            imageUrl: String(event.imageUrl || ""),
             timestamp: formatTime(incomingTimestamp),
             createdAt: incomingTimestamp,
             fromMe: isFromMe,
@@ -426,7 +442,9 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
 
           return {
             ...chat,
-            lastMessage: String(event.text || ""),
+            lastMessage:
+              String(event.text || "") ||
+              (String(event.imageUrl || "") ? "📷 Photo" : ""),
             lastMessageFromMe: isFromMe,
             lastMessageAt: incomingTimestamp,
             time: formatTime(incomingTimestamp),
@@ -458,7 +476,11 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
           chatsRef.current.find((c) => c.id === contactId)?.name ||
           "New message";
         new Notification(label, {
-          body: String(event.text || "You received a new message."),
+          body:
+            String(event.text || "") ||
+            (String(event.imageUrl || "")
+              ? "📷 You received a photo."
+              : "You received a new message."),
         });
       }
     };
@@ -584,9 +606,14 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
     );
   };
 
-  const handleSendMessage = async (chat, text) => {
+  const handleSendMessage = async (chat, inputPayload) => {
     if (!chat?.id || !effectiveUserId) return;
     if (isSendingMessageRef.current) return;
+
+    const { text, imageDataUrl } = normalizeOutgoingMessageInput(inputPayload);
+    const normalizedText = String(text || "").trim();
+
+    if (!normalizedText && !imageDataUrl) return;
 
     isSendingMessageRef.current = true;
     setSendingMessage(true);
@@ -602,7 +629,8 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
         body: JSON.stringify({
           senderId: effectiveUserId,
           receiverId: chat.id,
-          text,
+          text: normalizedText,
+          imageDataUrl,
         }),
       });
 
@@ -631,7 +659,9 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
           );
           return {
             ...item,
-            lastMessage: text,
+            lastMessage:
+              normalizedText ||
+              (String(nextMessage.imageUrl || "") ? "📷 Photo" : ""),
             lastMessageFromMe: true,
             lastMessageAt:
               payload.message?.timestamp || new Date().toISOString(),

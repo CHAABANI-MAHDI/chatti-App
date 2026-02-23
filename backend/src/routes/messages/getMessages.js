@@ -132,11 +132,18 @@ const registerGetMessagesRoute = (app, ctx) => {
       return res.status(200).json({ messages: [] });
     }
 
+    const selectedColumns = [
+      "id",
+      messageColumns.senderColumn,
+      "conversation_id",
+      messageColumns.bodyColumn,
+      "created_at",
+      ...(messageColumns.imageColumn ? [messageColumns.imageColumn] : []),
+    ];
+
     const { data, error } = await profileClient
       .from(ctx.messagesTable)
-      .select(
-        `id, ${messageColumns.senderColumn}, conversation_id, ${messageColumns.bodyColumn}, created_at`,
-      )
+      .select(selectedColumns.join(", "))
       .eq("conversation_id", conversationId)
       .order("created_at", { ascending: true })
       .limit(5000);
@@ -147,23 +154,57 @@ const registerGetMessagesRoute = (app, ctx) => {
       });
     }
 
+    const imageUrlCache = new Map();
+    const resolveImageUrl = async (imagePath = "") => {
+      const normalizedPath = String(imagePath || "").trim();
+      if (!normalizedPath) {
+        return "";
+      }
+
+      if (imageUrlCache.has(normalizedPath)) {
+        return imageUrlCache.get(normalizedPath);
+      }
+
+      const resolved = await ctx.resolveAvatarForClient(
+        normalizedPath,
+        ctx.supabaseServiceClient || profileClient,
+      );
+      imageUrlCache.set(normalizedPath, resolved || "");
+      return resolved || "";
+    };
+
+    const mappedMessages = await Promise.all(
+      (data || []).map(async (row) => {
+        const rawBody = String(row?.[messageColumns.bodyColumn] || "");
+        const decodedBody = ctx.decodeInlineImageMessageBody(rawBody);
+        const imagePath = messageColumns.imageColumn
+          ? String(row?.[messageColumns.imageColumn] || "").trim()
+          : decodedBody.imagePath;
+        const imageUrl = await resolveImageUrl(imagePath);
+        const text = messageColumns.imageColumn ? rawBody : decodedBody.text;
+
+        return {
+          id: row.id || null,
+          text,
+          imageUrl,
+          timestamp: row.created_at || null,
+          fromMe: row[messageColumns.senderColumn] === ownerMessageSenderValue,
+          senderPhone:
+            row[messageColumns.senderColumn] === ownerMessageSenderValue
+              ? ctx.formatPhoneFromDb(ownerPhoneFromDb)
+              : ctx.formatPhoneFromDb(contactPhoneFromDb),
+          receiverPhone:
+            row[messageColumns.senderColumn] === ownerMessageSenderValue
+              ? ctx.formatPhoneFromDb(contactPhoneFromDb)
+              : ctx.formatPhoneFromDb(ownerPhoneFromDb),
+          read: row[messageColumns.senderColumn] === ownerMessageSenderValue,
+          readAt: null,
+        };
+      }),
+    );
+
     return res.status(200).json({
-      messages: (data || []).map((row) => ({
-        id: row.id || null,
-        text: String(row[messageColumns.bodyColumn] || ""),
-        timestamp: row.created_at || null,
-        fromMe: row[messageColumns.senderColumn] === ownerMessageSenderValue,
-        senderPhone:
-          row[messageColumns.senderColumn] === ownerMessageSenderValue
-            ? ctx.formatPhoneFromDb(ownerPhoneFromDb)
-            : ctx.formatPhoneFromDb(contactPhoneFromDb),
-        receiverPhone:
-          row[messageColumns.senderColumn] === ownerMessageSenderValue
-            ? ctx.formatPhoneFromDb(contactPhoneFromDb)
-            : ctx.formatPhoneFromDb(ownerPhoneFromDb),
-        read: row[messageColumns.senderColumn] === ownerMessageSenderValue,
-        readAt: null,
-      })),
+      messages: mappedMessages,
     });
   });
 };
