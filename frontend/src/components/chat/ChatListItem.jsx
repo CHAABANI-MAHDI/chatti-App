@@ -7,6 +7,9 @@ function ChatListItem({
   variant = "desktop",
 }) {
   const isMobile = variant === "mobile";
+  const previewText = chat.lastMessage
+    ? `${chat.lastMessageFromMe ? "You: " : ""}${chat.lastMessage}`
+    : "No messages yet";
 
   return (
     <button
@@ -54,7 +57,7 @@ function ChatListItem({
             <p
               className={`truncate text-white/65 ${isMobile ? "text-xs" : "text-sm text-white/80"}`}
             >
-              {chat.lastMessage || "No messages yet"}
+              {previewText}
             </p>
           )}
         </div>

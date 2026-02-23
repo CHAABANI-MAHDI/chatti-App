@@ -30,6 +30,7 @@ const mapProfileToChat = (profile) => ({
   role: "Team member",
   timezone: "UTC",
   lastMessage: "",
+  lastMessageFromMe: false,
   time: "",
   unread: 0,
   messages: [],
@@ -59,10 +60,35 @@ const isAuthExpiredMessage = (message = "") =>
 const mapConversationToChat = (conversation) => ({
   ...mapProfileToChat(conversation),
   lastMessage: conversation.lastMessage || "",
+  lastMessageFromMe: Boolean(conversation.lastMessageFromMe),
   unread: Number(conversation.unread || 0),
   time: formatTime(conversation.lastMessageAt),
   lastMessageAt: conversation.lastMessageAt || null,
 });
+
+const APP_PREFERENCES_KEY = "relatime-chat-preferences";
+const DEFAULT_PREFERENCES = {
+  showMessagePreview: true,
+  showUnreadBadge: true,
+  muteNotifications: false,
+};
+
+const readStoredPreferences = () => {
+  try {
+    const rawPreferences = localStorage.getItem(APP_PREFERENCES_KEY);
+    if (!rawPreferences) {
+      return DEFAULT_PREFERENCES;
+    }
+
+    const parsed = JSON.parse(rawPreferences);
+    return {
+      ...DEFAULT_PREFERENCES,
+      ...parsed,
+    };
+  } catch {
+    return DEFAULT_PREFERENCES;
+  }
+};
 
 function Chat({ currentUser, onLogout, onProfileSave }) {
   const effectiveUserId = String(
@@ -82,11 +108,7 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
   const [mobileDraftProfile, setMobileDraftProfile] = useState(mobileProfile);
   const [isMobileProfileOpen, setIsMobileProfileOpen] = useState(false);
   const [isMobileSettingsOpen, setIsMobileSettingsOpen] = useState(false);
-  const [mobilePreferences, setMobilePreferences] = useState({
-    showMessagePreview: true,
-    showUnreadBadge: true,
-    muteNotifications: false,
-  });
+  const [preferences, setPreferences] = useState(readStoredPreferences);
 
   const socketRef = useRef(null);
   const isSendingMessageRef = useRef(false);
@@ -95,6 +117,7 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
   const chatsRef = useRef([]);
   const fetchConversationsRef = useRef(async () => {});
   const markConversationAsReadRef = useRef(async () => {});
+  const preferencesRef = useRef(preferences);
 
   const selectedChat = useMemo(
     () => chats.find((chat) => chat.id === selectedChatId) ?? null,
@@ -107,6 +130,15 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
   useEffect(() => {
     chatsRef.current = chats;
   }, [chats]);
+
+  useEffect(() => {
+    preferencesRef.current = preferences;
+    try {
+      localStorage.setItem(APP_PREFERENCES_KEY, JSON.stringify(preferences));
+    } catch {
+      // Intentionally ignored
+    }
+  }, [preferences]);
 
   const handleAuthExpired = (message = "") => {
     if (authExpiredHandledRef.current) return;
@@ -230,6 +262,7 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
               ...(latestMessage
                 ? {
                     lastMessage: latestMessage.text || "",
+                    lastMessageFromMe: Boolean(latestMessage.fromMe),
                     lastMessageAt:
                       latestSourceMessage?.timestamp || chat.lastMessageAt,
                     time:
@@ -302,10 +335,11 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
   }, [currentUser?.id, currentUser?.accessToken]);
 
   useEffect(() => {
+    if (preferences.muteNotifications) return;
     if (!("Notification" in window)) return;
     if (Notification.permission === "default")
       Notification.requestPermission().catch(() => null);
-  }, []);
+  }, [preferences.muteNotifications]);
 
   useEffect(() => {
     if (!chats.length) {
@@ -393,6 +427,7 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
           return {
             ...chat,
             lastMessage: String(event.text || ""),
+            lastMessageFromMe: isFromMe,
             lastMessageAt: incomingTimestamp,
             time: formatTime(incomingTimestamp),
             unread: shouldIncrementUnread ? Number(chat.unread || 0) + 1 : 0,
@@ -414,6 +449,7 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
       if (
         !isFromMe &&
         selectedChatIdRef.current !== contactId &&
+        !preferencesRef.current.muteNotifications &&
         "Notification" in window &&
         Notification.permission === "granted" &&
         document.hidden
@@ -596,6 +632,7 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
           return {
             ...item,
             lastMessage: text,
+            lastMessageFromMe: true,
             lastMessageAt:
               payload.message?.timestamp || new Date().toISOString(),
             time: formatTime(
@@ -729,8 +766,8 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
                       handleSelectChat(chat.id);
                       setSidebarOpen(false);
                     }}
-                    showMessagePreview={mobilePreferences.showMessagePreview}
-                    showUnreadBadge={mobilePreferences.showUnreadBadge}
+                    showMessagePreview={preferences.showMessagePreview}
+                    showUnreadBadge={preferences.showUnreadBadge}
                     variant="mobile"
                   />
                 ))
@@ -759,10 +796,10 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
         <SettingsModal
           isOpen={isMobileSettingsOpen}
           onClose={() => setIsMobileSettingsOpen(false)}
-          preferences={mobilePreferences}
-          setPreferences={setMobilePreferences}
+          preferences={preferences}
+          setPreferences={setPreferences}
           onLogout={onLogout}
-          description="Quick preferences for mobile chat list."
+          description="Suggested quick preferences for cleaner chat experience."
           containerClassName="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm md:hidden"
         />
 
@@ -773,7 +810,7 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
             chat={selectedChat}
             onSendMessage={handleSendMessage}
             sendingMessage={sendingMessage}
-             socketStatus={socketStatus}
+            socketStatus={socketStatus}
           />
         </div>
       </div>
@@ -788,6 +825,8 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
           selectedChatId={selectedChatId}
           onSelectChat={handleSelectChat}
           currentUser={currentUser}
+          preferences={preferences}
+          setPreferences={setPreferences}
           onLogout={onLogout}
           onProfileSave={onProfileSave}
           onSearchUser={searchUserByNameOrEmail}
@@ -797,7 +836,7 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
           chat={selectedChat}
           onSendMessage={handleSendMessage}
           sendingMessage={sendingMessage}
-           socketStatus={socketStatus}
+          socketStatus={socketStatus}
         />
       </div>
     </>

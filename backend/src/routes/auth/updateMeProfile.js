@@ -31,7 +31,6 @@ const registerUpdateMeProfileRoute = (app, ctx) => {
     const providedName = String(req.body?.name || "").trim();
     const providedPhone = ctx.normalizePhone(req.body?.phone);
     const providedImage = String(req.body?.image || "").trim();
-    const providedStatusText = String(req.body?.statusText || "").trim();
 
     if (!ctx.validateEmail(targetEmail)) {
       return res.status(400).json({
@@ -226,7 +225,6 @@ const registerUpdateMeProfileRoute = (app, ctx) => {
       phone: nextPhoneForDb || null,
       display_name: resolvedName,
       avatar_url: resolvedAvatarUrl || null,
-      status_text: providedStatusText || null,
     };
 
     const targetProfileId = byId?.id || matchedProfileIds[0] || "";
@@ -287,10 +285,6 @@ const registerUpdateMeProfileRoute = (app, ctx) => {
       phone: nextPhone || "",
       image:
         resolvedAvatarUrl || String(existingMetadata.image || "").trim() || "",
-      statusText:
-        providedStatusText ||
-        String(existingMetadata.statusText || "").trim() ||
-        "",
     };
 
     const authUpdatePayload = {
@@ -304,15 +298,34 @@ const registerUpdateMeProfileRoute = (app, ctx) => {
     const { data: updatedAuthData, error: authUpdateError } =
       await authClient.auth.updateUser(authUpdatePayload);
 
-    if (authUpdateError) {
+    const authUpdateMessage = String(authUpdateError?.message || "");
+    const shouldIgnoreAuthUpdateError =
+      authUpdateMessage.toLowerCase().includes("auth session missing") ||
+      authUpdateMessage.toLowerCase().includes("invalid jwt") ||
+      authUpdateMessage.toLowerCase().includes("jwt expired") ||
+      authUpdateMessage.toLowerCase().includes("token expired");
+
+    if (authUpdateError && !shouldIgnoreAuthUpdateError) {
       return res.status(500).json({
         message: authUpdateError.message || "Failed to update auth profile.",
       });
     }
 
+    const mappedUser = ctx.mapAuthUserForClient(updatedAuthData?.user || user);
+    const resolvedClientImage = await ctx.resolveAvatarForClient(
+      resolvedAvatarUrl,
+      profileWriteClient,
+    );
+
     return res.status(200).json({
       message: "Profile updated successfully.",
-      user: ctx.mapAuthUserForClient(updatedAuthData?.user || user),
+      user: {
+        ...mappedUser,
+        name: resolvedName,
+        email: targetEmail,
+        phone: nextPhone || "",
+        image: resolvedClientImage || mappedUser.image || "",
+      },
     });
   });
 };

@@ -10,6 +10,8 @@ function List({
   selectedChatId,
   onSelectChat,
   currentUser,
+  preferences,
+  setPreferences,
   onLogout,
   onProfileSave,
   onSearchUser,
@@ -26,11 +28,6 @@ function List({
     image: currentUser?.image || "",
   });
   const [draftProfile, setDraftProfile] = useState(profile);
-  const [preferences, setPreferences] = useState({
-    showMessagePreview: true,
-    showUnreadBadge: true,
-    muteNotifications: false,
-  });
 
   const filteredChats = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -114,7 +111,9 @@ function List({
             <p className="text-xs text-white/70">Recent conversations</p>
           </div>
           <span className="rounded-full border border-white/20 bg-white/10 px-2 py-1 text-xs text-white/90">
-            {totalUnread > 0 ? `${totalUnread} new` : filteredChats.length}
+            {preferences.showUnreadBadge && totalUnread > 0
+              ? `${totalUnread} new`
+              : filteredChats.length}
           </span>
         </div>
 

@@ -141,7 +141,6 @@ const App = () => {
     image,
     email,
     phone,
-    statusText = "",
     accessToken = "",
   }) => {
     const response = await fetch(`${API_BASE_URL}/auth/me/profile`, {
@@ -159,7 +158,6 @@ const App = () => {
         image,
         email,
         phone,
-        statusText,
       }),
     });
 
@@ -208,7 +206,6 @@ const App = () => {
               image: authUser.image || "",
               email: authUser.email || "",
               phone: authUser.phone || "",
-              statusText: authUser.statusText || "",
               accessToken: authUser.accessToken,
             });
 
@@ -381,7 +378,6 @@ const App = () => {
       email: updates?.email || currentUser.email || "",
       name: updates?.name || currentUser.name || "User",
       image: updates?.image || "",
-      statusText: updates?.statusText || "",
       accessToken: currentUser.accessToken || "",
     });
 

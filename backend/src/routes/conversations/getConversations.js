@@ -143,6 +143,10 @@ const registerGetConversationsRoute = (app, ctx) => {
     }
 
     const messageColumns = await ctx.resolveMessageColumns(profileClient);
+    const ownerMessageSenderValue = ctx.resolveMessageSenderValue(
+      ownerProfile,
+      messageColumns.senderColumn,
+    );
 
     const { data: messageRows, error: messagesError } = await profileClient
       .from(ctx.messagesTable)
@@ -204,6 +208,9 @@ const registerGetConversationsRoute = (app, ctx) => {
             ...baseProfile,
             lastMessage: latestMessage?.[messageColumns.bodyColumn] || "",
             lastMessageAt: latestMessage?.created_at || null,
+            lastMessageFromMe:
+              latestMessage?.[messageColumns.senderColumn] ===
+              ownerMessageSenderValue,
             unread: 0,
           };
         },
