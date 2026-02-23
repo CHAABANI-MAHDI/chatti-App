@@ -15,7 +15,9 @@ function ProfileModal({
       onClose={onClose}
       containerClassName={containerClassName}
     >
-      <h3 className="mb-3 text-base font-semibold text-white">Edit profile</h3>
+      <h3 className="mb-3 text-base font-semibold text-white sm:text-lg">
+        Edit profile
+      </h3>
 
       <div className="space-y-2">
         <div>
@@ -34,7 +36,7 @@ function ProfileModal({
                 </span>
               )}
             </div>
-            <label className="cursor-pointer rounded-lg border border-white/20 bg-white/10 px-3 py-1.5 text-xs text-white/90 hover:bg-white/15">
+            <label className="cursor-pointer rounded-lg border border-white/20 bg-white/10 px-2.5 py-1.5 text-[11px] text-white/90 hover:bg-white/15 sm:px-3 sm:text-xs">
               Upload new image
               <input
                 type="file"
@@ -57,7 +59,7 @@ function ProfileModal({
               }))
             }
             placeholder="Your name"
-            className="w-full rounded-lg border border-white/20 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-white/60 outline-none"
+            className="w-full rounded-lg border border-white/20 bg-black/20 px-3 py-2 text-xs text-white placeholder:text-white/60 outline-none sm:text-sm"
           />
         </div>
         <div>
@@ -72,7 +74,7 @@ function ProfileModal({
               }))
             }
             placeholder="Email address"
-            className="w-full rounded-lg border border-white/20 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-white/60 outline-none"
+            className="w-full rounded-lg border border-white/20 bg-black/20 px-3 py-2 text-xs text-white placeholder:text-white/60 outline-none sm:text-sm"
           />
         </div>
       </div>
@@ -81,14 +83,14 @@ function ProfileModal({
         <button
           type="button"
           onClick={onClose}
-          className="rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-xs text-white/90 hover:bg-white/15"
+          className="rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-[11px] text-white/90 hover:bg-white/15 sm:text-xs"
         >
           Cancel
         </button>
         <button
           type="button"
           onClick={onSave}
-          className="rounded-lg bg-[#5e8b5a]/85 px-3 py-2 text-xs font-medium text-white hover:bg-[#5e8b5a]"
+          className="rounded-lg bg-[#5e8b5a]/85 px-3 py-2 text-[11px] font-medium text-white hover:bg-[#5e8b5a] sm:text-xs"
         >
           Save
         </button>

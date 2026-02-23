@@ -710,7 +710,7 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
   return (
     <>
       {/* ════════════════ MOBILE layout ════════════════ */}
-      <div className="flex h-full w-full flex-col overflow-hidden rounded-3xl border border-white/25 bg-[#132219]/75 text-white shadow-2xl backdrop-blur-2xl md:hidden">
+      <div className="flex h-full w-full flex-col overflow-hidden rounded-none border-0 bg-[#132219]/75 text-white shadow-none backdrop-blur-2xl md:hidden md:rounded-3xl md:border md:border-white/25 md:shadow-2xl">
         {/* Top bar */}
         <div className="shrink-0 flex items-center gap-2 border-b border-white/15 bg-[#0d1712]/80 px-4 py-3">
           <button
@@ -743,7 +743,7 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
 
         {/* Slide-out sidebar */}
         <div
-          className={`fixed inset-y-0 left-0 z-40 w-[82%] max-w-[320px] border-r border-white/15 bg-[#0f1a14]/95 backdrop-blur-xl transition-transform duration-300 md:hidden ${
+          className={`fixed inset-y-0 left-0 z-40 w-[86%] max-w-[340px] border-r border-white/15 bg-[#0f1a14]/95 backdrop-blur-xl transition-transform duration-300 md:hidden ${
             sidebarOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
@@ -869,7 +869,7 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
       {/* CRITICAL FIX: min-h-0 tells the grid to respect its flex-parent's
           height instead of growing to fit content. minmax(0,1fr) on the
           Detail column already prevents horizontal overflow. */}
-      <div className="hidden min-h-0 h-full w-full overflow-hidden rounded-3xl border border-white/25 bg-[#132219]/75 text-white shadow-2xl backdrop-blur-2xl md:grid md:grid-cols-[320px_minmax(0,1fr)] lg:grid-cols-[360px_minmax(0,1fr)]">
+      <div className="hidden min-h-0 h-full w-full overflow-hidden rounded-3xl border border-white/25 bg-[#132219]/75 text-white shadow-2xl backdrop-blur-2xl md:grid md:grid-cols-[minmax(280px,340px)_minmax(0,1fr)] lg:grid-cols-[minmax(320px,380px)_minmax(0,1fr)]">
         <List
           chats={chats}
           selectedChatId={selectedChatId}

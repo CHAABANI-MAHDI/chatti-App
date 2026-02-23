@@ -16,7 +16,7 @@ function ChatListItem({
       type="button"
       onClick={onClick}
       title={`${chat.name} • ${chat.status}`}
-      className={`w-full rounded-2xl border px-3 py-2 text-left transition-all ${
+      className={`w-full rounded-2xl border px-2.5 py-2 text-left transition-all sm:px-3 ${
         isActive
           ? isMobile
             ? "border-lime-300/70 bg-lime-200/20"
@@ -54,7 +54,7 @@ function ChatListItem({
           <div
             className={`mb-0.5 ${isMobile ? "block" : "flex items-center justify-between gap-2"}`}
           >
-            <p className="truncate text-sm font-medium text-white/95">
+            <p className="truncate text-xs font-medium text-white/95 sm:text-sm">
               {chat.name}
             </p>
             {!isMobile && (

@@ -574,7 +574,7 @@ function Detail({
             chatMessages.map((message, index) => (
               <div
                 key={`${message.id || "msg"}-${index}`}
-                className={`w-fit max-w-[85%] break-words rounded-2xl px-3 py-2 text-sm text-white shadow md:max-w-[75%] ${
+                className={`w-fit max-w-[92%] break-words rounded-2xl px-3 py-2 text-sm text-white shadow sm:max-w-[85%] md:max-w-[75%] ${
                   message.fromMe
                     ? "ml-auto bg-[#6ca56a]/80 text-right"
                     : "mr-auto bg-white/25"
@@ -605,8 +605,8 @@ function Detail({
                     src={message.audioUrl}
                     className={
                       message.text || message.imageUrl
-                        ? "mt-2 w-full min-w-[240px]"
-                        : "w-full min-w-[240px]"
+                        ? "mt-2 w-full min-w-[160px] sm:min-w-[240px]"
+                        : "w-full min-w-[160px] sm:min-w-[240px]"
                     }
                   />
                 ) : null}
@@ -954,7 +954,7 @@ function Detail({
     <section className="flex h-full flex-1 flex-col overflow-hidden bg-[#15261d]/35 p-3 md:p-5">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {/* Header — shrink-0 so it never collapses */}
-        <header className="mb-4 shrink-0 flex items-center justify-between gap-2 rounded-2xl border border-white/20 bg-white/12 px-4 py-3 md:px-5">
+        <header className="mb-3 shrink-0 flex items-center justify-between gap-2 rounded-2xl border border-white/20 bg-white/12 px-3 py-2.5 sm:mb-4 sm:px-4 sm:py-3 md:px-5">
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white/30 text-base font-semibold text-white">
               {chat.image ? (

@@ -399,7 +399,7 @@ const App = () => {
   };
 
   return (
-    <main className="mx-auto flex h-[min(900px,94vh)] w-full max-w-[1400px] p-2 sm:p-4">
+    <main className="mx-auto flex h-[100dvh] w-full max-w-[1400px] p-0 sm:h-[min(900px,96dvh)] sm:p-2 lg:p-3">
       {currentUser ? (
         <Chat
           currentUser={currentUser}

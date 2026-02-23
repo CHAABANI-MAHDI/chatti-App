@@ -190,13 +190,13 @@ function Auth({ onAuthSuccess }) {
   };
 
   return (
-    <section className="mx-auto flex h-full w-full max-w-[460px] items-center justify-center">
-      <div className="w-full rounded-3xl border border-white/25 bg-[#132219]/75 p-6 text-white shadow-2xl backdrop-blur-2xl sm:p-7">
+    <section className="mx-auto flex h-full w-full max-w-[520px] items-center justify-center px-3 py-4 sm:px-4 sm:py-6">
+      <div className="w-full rounded-2xl border border-white/25 bg-[#132219]/78 p-4 text-white shadow-2xl backdrop-blur-2xl sm:rounded-3xl sm:p-7">
         <div className="mb-5">
-          <h1 className="text-left text-2xl font-semibold tracking-tight text-white">
+          <h1 className="text-left text-xl font-semibold tracking-tight text-white sm:text-2xl">
             Welcome to Chatti
           </h1>
-          <p className="mt-1 text-left text-sm text-white/70">
+          <p className="mt-1 text-left text-xs text-white/70 sm:text-sm">
             Sign in with email and password, or create a new account.
           </p>
         </div>

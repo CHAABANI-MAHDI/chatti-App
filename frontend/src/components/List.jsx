@@ -95,7 +95,7 @@ function List({
   };
 
   return (
-    <aside className="relative flex h-full w-full flex-col border-r border-white/15 bg-[#193027]/65 p-4 md:p-5">
+    <aside className="relative flex h-full w-full flex-col border-r border-white/15 bg-[#193027]/65 p-3 md:p-4 lg:p-5">
       <div className="mb-4">
         <ProfileSummaryCard
           profile={profile}
@@ -103,9 +103,9 @@ function List({
           onSettings={() => setIsSettingsOpen(true)}
         />
 
-        <div className="mb-4 flex items-center justify-between gap-2">
+        <div className="mb-3 flex items-center justify-between gap-2 sm:mb-4">
           <div>
-            <h2 className="text-xl font-semibold tracking-tight text-white">
+            <h2 className="text-lg font-semibold tracking-tight text-white sm:text-xl">
               Messages
             </h2>
             <p className="text-xs text-white/70">Recent conversations</p>
@@ -123,7 +123,7 @@ function List({
             value={searchTerm}
             onChange={(event) => setSearchTerm(event.target.value)}
             placeholder="Search messages..."
-            className="w-full rounded-xl border border-white/20 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-white/60 outline-none transition-colors focus:border-lime-200/45"
+            className="w-full rounded-xl border border-white/20 bg-black/20 px-3 py-2 text-xs text-white placeholder:text-white/60 outline-none transition-colors focus:border-lime-200/45 sm:text-sm"
           />
           <button
             type="button"
@@ -136,7 +136,7 @@ function List({
         </div>
       </div>
 
-      <div className="flex-1 space-y-2.5 overflow-y-auto pr-1">
+      <div className="flex-1 space-y-2 overflow-y-auto pr-1 sm:space-y-2.5">
         {filteredChats.length === 0 ? (
           <div className="rounded-lg border border-white/15 bg-black/15 p-3 text-sm text-white/75">
             No users found.
@@ -163,7 +163,7 @@ function List({
         setDraftProfile={setDraftProfile}
         onImageUpload={handleProfileImageUpload}
         onSave={saveProfile}
-        containerClassName="absolute inset-0 z-20 flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm"
+        containerClassName="absolute inset-0 z-20 flex items-center justify-center bg-black/45 p-3 backdrop-blur-sm sm:p-4"
       />
 
       <SettingsModal
@@ -173,7 +173,7 @@ function List({
         setPreferences={setPreferences}
         onLogout={onLogout}
         description="Suggested quick preferences for cleaner chat experience."
-        containerClassName="absolute inset-0 z-20 flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm"
+        containerClassName="absolute inset-0 z-20 flex items-center justify-center bg-black/45 p-3 backdrop-blur-sm sm:p-4"
       />
 
       <AddUserByPhoneModal

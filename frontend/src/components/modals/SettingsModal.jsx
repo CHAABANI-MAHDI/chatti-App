@@ -15,8 +15,10 @@ function SettingsModal({
       onClose={onClose}
       containerClassName={containerClassName}
     >
-      <h3 className="mb-1 text-base font-semibold text-white">Settings</h3>
-      <p className="mb-4 text-xs text-white/65">{description}</p>
+      <h3 className="mb-1 text-base font-semibold text-white sm:text-lg">
+        Settings
+      </h3>
+      <p className="mb-4 text-xs text-white/65 sm:text-sm">{description}</p>
 
       <div className="space-y-2.5">
         <p className="text-left text-xs font-semibold uppercase tracking-wide text-white/60">
@@ -30,7 +32,7 @@ function SettingsModal({
               showMessagePreview: !previous.showMessagePreview,
             }))
           }
-          className="flex w-full items-center justify-between rounded-lg border border-white/20 bg-black/20 px-3 py-2 text-left"
+          className="flex w-full items-center justify-between rounded-lg border border-white/20 bg-black/20 px-3 py-2.5 text-left"
         >
           <span className="text-sm text-white/90">
             Show last message preview
@@ -48,7 +50,7 @@ function SettingsModal({
               showUnreadBadge: !previous.showUnreadBadge,
             }))
           }
-          className="flex w-full items-center justify-between rounded-lg border border-white/20 bg-black/20 px-3 py-2 text-left"
+          className="flex w-full items-center justify-between rounded-lg border border-white/20 bg-black/20 px-3 py-2.5 text-left"
         >
           <span className="text-sm text-white/90">Show unread badges</span>
           <span className="text-xs text-white/70">
@@ -68,7 +70,7 @@ function SettingsModal({
               muteNotifications: !previous.muteNotifications,
             }))
           }
-          className="flex w-full items-center justify-between rounded-lg border border-white/20 bg-black/20 px-3 py-2 text-left"
+          className="flex w-full items-center justify-between rounded-lg border border-white/20 bg-black/20 px-3 py-2.5 text-left"
         >
           <span className="text-sm text-white/90">Mute notifications</span>
           <span className="text-xs text-white/70">
@@ -83,7 +85,7 @@ function SettingsModal({
         <button
           type="button"
           onClick={onLogout}
-          className="flex w-full items-center justify-center rounded-lg border border-white/20 bg-black/20 px-3 py-2 text-sm text-white/90 hover:bg-white/10"
+          className="flex w-full items-center justify-center rounded-lg border border-white/20 bg-black/20 px-3 py-2.5 text-sm text-white/90 hover:bg-white/10"
         >
           Logout
         </button>

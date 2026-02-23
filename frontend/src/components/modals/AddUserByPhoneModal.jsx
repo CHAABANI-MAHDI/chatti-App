@@ -112,9 +112,9 @@ function AddUserByPhoneModal({
     <OverlayModal
       isOpen={isOpen}
       onClose={onClose}
-      containerClassName="absolute inset-0 z-30 flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm"
+      containerClassName="absolute inset-0 z-30 flex items-center justify-center bg-black/45 p-3 backdrop-blur-sm sm:p-4"
     >
-      <h3 className="text-base font-semibold text-white">
+      <h3 className="text-base font-semibold text-white sm:text-lg">
         Add user by name or email
       </h3>
       <p className="mt-1 text-xs text-white/70">
@@ -126,7 +126,7 @@ function AddUserByPhoneModal({
         value={queryInput}
         onChange={(event) => setQueryInput(event.target.value)}
         placeholder="name or email"
-        className="mt-3 w-full rounded-xl border border-white/20 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-white/55 outline-none transition-colors focus:border-lime-200/45"
+        className="mt-3 w-full rounded-xl border border-white/20 bg-black/20 px-3 py-2 text-xs text-white placeholder:text-white/55 outline-none transition-colors focus:border-lime-200/45 sm:text-sm"
       />
 
       {status === "loading" && (
@@ -166,7 +166,7 @@ function AddUserByPhoneModal({
               )}
             </div>
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-white/95">
+              <p className="truncate text-xs font-semibold text-white/95 sm:text-sm">
                 {lookupResult.name || "User"}
               </p>
               <p className="truncate text-xs text-white/65">
@@ -178,7 +178,7 @@ function AddUserByPhoneModal({
             type="button"
             onClick={handleAdd}
             disabled={alreadyAdded || status === "adding"}
-            className="mt-3 w-full rounded-lg bg-[#5e8b5a]/85 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-[#5e8b5a] disabled:cursor-not-allowed disabled:opacity-60"
+            className="mt-3 w-full rounded-lg bg-[#5e8b5a]/85 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-[#5e8b5a] disabled:cursor-not-allowed disabled:opacity-60 sm:text-sm"
           >
             {alreadyAdded
               ? "Already added"
