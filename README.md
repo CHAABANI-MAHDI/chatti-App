@@ -5,7 +5,7 @@ Full-stack real-time chat app built with **React + Vite (frontend)** and **Node.
 ## Screenshots
 
 <p align="center">
-  <img alt="Chat" src="frontend/public/Chatti.png" width="31%" />
+  <img alt="Chat" src="frontend/public/Chatti.png" width="100%" />
 </p>
 
 ## Features
