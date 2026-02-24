@@ -2,21 +2,22 @@ const DEFAULT_API_BASE_URL = "http://localhost:5001";
 
 const normalizeApiBaseUrl = (value) => {
   const raw = String(value || "").trim();
+  const sanitized = raw.replace(/^['"]+|['"]+$/g, "");
 
-  if (!raw) {
+  if (!sanitized) {
     return DEFAULT_API_BASE_URL;
   }
 
-  if (/^https?:\/\/localhost:5000\/?$/i.test(raw)) {
+  if (/^https?:\/\/localhost:5000\/?$/i.test(sanitized)) {
     return DEFAULT_API_BASE_URL;
   }
 
-  if (/^https?:\/\//i.test(raw)) {
-    return raw.replace(/\/+$/, "");
+  if (/^https?:\/\//i.test(sanitized)) {
+    return sanitized.replace(/\/+$/, "");
   }
 
-  if (/^:\d+$/i.test(raw)) {
-    return `http://localhost${raw}`;
+  if (/^:\d+$/i.test(sanitized)) {
+    return `http://localhost${sanitized}`;
   }
 
   return DEFAULT_API_BASE_URL;

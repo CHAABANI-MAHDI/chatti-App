@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: relatime-chat-backend
+    runtime: node
+    rootDir: backend
+    plan: free
+    autoDeploy: true
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: Chatti - App
+      - key: PROFILES_TABLE
+        value: profiles
+      - key: MESSAGES_TABLE
+        value: messages
+      - key: CONVERSATION_MEMBER_USER_COLUMN
+        value: ""
+      - key: MESSAGE_SENDER_COLUMN
+        value: ""
+      - key: MESSAGE_BODY_COLUMN
+        value: ""
+      - key: MESSAGE_IMAGE_COLUMN
+        value: ""
+      - key: MESSAGE_AUDIO_COLUMN
+        value: ""
