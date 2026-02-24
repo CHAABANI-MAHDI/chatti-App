@@ -22,10 +22,6 @@ const registerSearchProfilesRoute = (app, ctx) => {
       });
     }
 
-    if (!rawQuery) {
-      return res.status(200).json({ profile: null });
-    }
-
     const baseSelect =
       "id, phone, email, display_name, avatar_url, status_text";
     const normalizedQuery = rawQuery.toLowerCase();
@@ -43,13 +39,24 @@ const registerSearchProfilesRoute = (app, ctx) => {
     let rows = [];
     let queryError = null;
 
-    if (ctx.validateEmail(rawQuery)) {
+    if (!rawQuery) {
+      const { data, error } = await applyExclusions(
+        profileClient
+          .from(ctx.profilesTable)
+          .select(baseSelect)
+          .order("display_name", { ascending: true })
+          .limit(50),
+      );
+
+      rows = data || [];
+      queryError = error;
+    } else if (ctx.validateEmail(rawQuery)) {
       const { data, error } = await applyExclusions(
         profileClient
           .from(ctx.profilesTable)
           .select(baseSelect)
           .eq("email", ctx.normalizeEmail(rawQuery))
-          .limit(1),
+          .limit(20),
       );
 
       rows = data || [];
@@ -60,7 +67,7 @@ const registerSearchProfilesRoute = (app, ctx) => {
           .from(ctx.profilesTable)
           .select(baseSelect)
           .ilike("display_name", `%${rawQuery}%`)
-          .limit(10),
+          .limit(25),
       );
 
       if (byNameError) {
@@ -71,7 +78,7 @@ const registerSearchProfilesRoute = (app, ctx) => {
             .from(ctx.profilesTable)
             .select(baseSelect)
             .ilike("email", `%${normalizedQuery}%`)
-            .limit(10),
+            .limit(25),
         );
 
         if (byEmailError) {
@@ -112,26 +119,34 @@ const registerSearchProfilesRoute = (app, ctx) => {
       });
     }
 
-    if (!rows.length) {
-      return res.status(200).json({ profile: null });
-    }
-
     const mappedProfiles = await Promise.all(
       rows.map((row) => ctx.mapProfileRecord(row, profileClient)),
     );
 
-    const exactProfile = mappedProfiles.find((profile) => {
-      const profileName = String(profile?.name || "")
-        .trim()
-        .toLowerCase();
-      const profileEmail = ctx.normalizeEmail(profile?.email || "");
-      return (
-        profileName === normalizedQuery || profileEmail === normalizedQuery
-      );
-    });
+    const exactProfile = rawQuery
+      ? mappedProfiles.find((profile) => {
+          const profileName = String(profile?.name || "")
+            .trim()
+            .toLowerCase();
+          const profileEmail = ctx.normalizeEmail(profile?.email || "");
+          return (
+            profileName === normalizedQuery || profileEmail === normalizedQuery
+          );
+        })
+      : null;
+
+    const profiles = exactProfile
+      ? [
+          exactProfile,
+          ...mappedProfiles.filter(
+            (profile) => profile?.id !== exactProfile.id,
+          ),
+        ]
+      : mappedProfiles;
 
     return res.status(200).json({
-      profile: exactProfile || mappedProfiles[0],
+      profile: profiles[0] || null,
+      profiles,
     });
   });
 };

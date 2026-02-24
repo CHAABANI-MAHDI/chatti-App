@@ -4,6 +4,7 @@ import { io } from "socket.io-client";
 import ChatListItem from "./chat/ChatListItem";
 import Detail from "./Detail";
 import List from "./List";
+import AddUserByPhoneModal from "./modals/AddUserByPhoneModal";
 import ProfileModal from "./modals/ProfileModal";
 import SettingsModal from "./modals/SettingsModal";
 import UserActions from "./shared/UserActions";
@@ -52,6 +53,7 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
   const [sendingMessage, setSendingMessage] = useState(false);
   const [socketStatus, setSocketStatus] = useState("connecting");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [mobileSearchTerm, setMobileSearchTerm] = useState("");
   const [mobileProfile, setMobileProfile] = useState({
     name: currentUser?.name || "My Profile",
     email: currentUser?.email || "",
@@ -62,6 +64,7 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
   const [mobileDraftProfile, setMobileDraftProfile] = useState(mobileProfile);
   const [isMobileProfileOpen, setIsMobileProfileOpen] = useState(false);
   const [isMobileSettingsOpen, setIsMobileSettingsOpen] = useState(false);
+  const [isMobileAddUserOpen, setIsMobileAddUserOpen] = useState(false);
   const [preferences, setPreferences] = useState(readStoredPreferences);
 
   const socketRef = useRef(null);
@@ -77,6 +80,20 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
     () => chats.find((chat) => chat.id === selectedChatId) ?? null,
     [chats, selectedChatId],
   );
+
+  const filteredMobileChats = useMemo(() => {
+    const query = mobileSearchTerm.trim().toLowerCase();
+
+    if (!query) {
+      return chats;
+    }
+
+    return chats.filter((chat) => {
+      const name = chat.name?.toLowerCase() ?? "";
+      const message = chat.lastMessage?.toLowerCase() ?? "";
+      return name.includes(query) || message.includes(query);
+    });
+  }, [chats, mobileSearchTerm]);
 
   useEffect(() => {
     selectedChatIdRef.current = selectedChatId;
@@ -508,7 +525,10 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
       }
       throw new Error(payload.message || "Failed to find user.");
     }
-    return payload.profile || null;
+    if (Array.isArray(payload.profiles)) {
+      return payload.profiles;
+    }
+    return payload.profile ? [payload.profile] : [];
   };
 
   const addUserToChats = async (profile) => {
@@ -727,13 +747,31 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
               </div>
             </div>
 
+            <div className="mx-3 mb-2 shrink-0 flex items-center gap-2">
+              <input
+                type="text"
+                value={mobileSearchTerm}
+                onChange={(event) => setMobileSearchTerm(event.target.value)}
+                placeholder="Search messages..."
+                className="w-full rounded-xl border border-white/20 bg-black/20 px-3 py-2 text-xs text-white placeholder:text-white/60 outline-none transition-colors focus:border-lime-200/45"
+              />
+              <button
+                type="button"
+                title="Add new user"
+                onClick={() => setIsMobileAddUserOpen(true)}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/20 bg-white/10 text-lg leading-none text-white/90 transition-colors hover:bg-white/15"
+              >
+                +
+              </button>
+            </div>
+
             <div className="flex-1 space-y-2 overflow-y-auto p-3">
-              {chats.length === 0 ? (
+              {filteredMobileChats.length === 0 ? (
                 <div className="rounded-lg border border-white/15 bg-black/15 p-3 text-sm text-white/75">
-                  No users yet.
+                  {chats.length === 0 ? "No users yet." : "No users found."}
                 </div>
               ) : (
-                chats.map((chat) => (
+                filteredMobileChats.map((chat) => (
                   <ChatListItem
                     key={chat.id}
                     chat={chat}
@@ -776,6 +814,16 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
           setPreferences={setPreferences}
           onLogout={onLogout}
           description="Suggested quick preferences for cleaner chat experience."
+          containerClassName="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm md:hidden"
+        />
+
+        <AddUserByPhoneModal
+          isOpen={isMobileAddUserOpen}
+          onClose={() => setIsMobileAddUserOpen(false)}
+          existingIds={chats.map((chat) => chat.id).filter(Boolean)}
+          currentUserId={currentUser?.id || ""}
+          onSearchUser={searchUserByNameOrEmail}
+          onAddUser={addUserToChats}
           containerClassName="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm md:hidden"
         />
 
