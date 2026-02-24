@@ -1,150 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import EmojiPicker from "emoji-picker-react";
-
-const formatDuration = (totalSeconds = 0) => {
-  const safeSeconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
-  const minutes = Math.floor(safeSeconds / 60)
-    .toString()
-    .padStart(2, "0");
-  const seconds = (safeSeconds % 60).toString().padStart(2, "0");
-  return `${minutes}:${seconds}`;
-};
-
-function VoicePlayback({ src, className = "" }) {
-  const audioRef = useRef(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [durationSeconds, setDurationSeconds] = useState(0);
-  const [currentSeconds, setCurrentSeconds] = useState(0);
-
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return undefined;
-
-    const handleLoadedMetadata = () => {
-      const duration = Number(audio.duration || 0);
-      setDurationSeconds(Number.isFinite(duration) ? duration : 0);
-    };
-
-    const handleTimeUpdate = () => {
-      setCurrentSeconds(Number(audio.currentTime || 0));
-    };
-
-    const handleEnded = () => {
-      setIsPlaying(false);
-      setCurrentSeconds(0);
-    };
-
-    const handlePause = () => {
-      setIsPlaying(false);
-    };
-
-    const handlePlay = () => {
-      setIsPlaying(true);
-    };
-
-    audio.addEventListener("loadedmetadata", handleLoadedMetadata);
-    audio.addEventListener("timeupdate", handleTimeUpdate);
-    audio.addEventListener("ended", handleEnded);
-    audio.addEventListener("pause", handlePause);
-    audio.addEventListener("play", handlePlay);
-
-    return () => {
-      audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
-      audio.removeEventListener("timeupdate", handleTimeUpdate);
-      audio.removeEventListener("ended", handleEnded);
-      audio.removeEventListener("pause", handlePause);
-      audio.removeEventListener("play", handlePlay);
-    };
-  }, [src]);
-
-  const togglePlay = async () => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    if (audio.paused) {
-      try {
-        await audio.play();
-      } catch {
-        setIsPlaying(false);
-      }
-      return;
-    }
-
-    audio.pause();
-  };
-
-  const onSeek = (event) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    const nextSeconds = Number(event.target.value || 0);
-    audio.currentTime = nextSeconds;
-    setCurrentSeconds(nextSeconds);
-  };
-
-  const progressPercent =
-    durationSeconds > 0
-      ? Math.min(100, (currentSeconds / durationSeconds) * 100)
-      : 0;
-  const waveformBars = [22, 38, 30, 52, 28, 42, 35, 55, 33, 40, 26, 48, 34, 44];
-
-  return (
-    <div
-      className={`rounded-xl border border-white/20 bg-black/25 p-2 ${className}`}
-    >
-      <audio ref={audioRef} preload="metadata" src={src} className="hidden" />
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={togglePlay}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/25 bg-white/10 text-white/90 hover:bg-white/15"
-          title={isPlaying ? "Pause voice" : "Play voice"}
-        >
-          {isPlaying ? (
-            <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
-              <path d="M6 4h3v12H6zM11 4h3v12h-3z" />
-            </svg>
-          ) : (
-            <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
-              <path d="M6 4l10 6-10 6V4z" />
-            </svg>
-          )}
-        </button>
-
-        <div className="min-w-0 flex-1">
-          <div className="mb-1 flex h-6 items-end gap-0.5">
-            {waveformBars.map((height, index) => {
-              const threshold = ((index + 1) / waveformBars.length) * 100;
-              const isActive = progressPercent >= threshold;
-              return (
-                <span
-                  key={`${height}-${index}`}
-                  className={`w-1 rounded-full ${isActive ? "bg-lime-300/90" : "bg-white/35"}`}
-                  style={{ height: `${height}%` }}
-                />
-              );
-            })}
-          </div>
-
-          <input
-            type="range"
-            min={0}
-            max={durationSeconds || 0}
-            step={0.1}
-            value={Math.min(currentSeconds, durationSeconds || 0)}
-            onChange={onSeek}
-            className="w-full accent-lime-300"
-          />
-
-          <div className="mt-0.5 flex items-center justify-between text-[10px] text-white/70">
-            <span>{formatDuration(currentSeconds)}</span>
-            <span>{formatDuration(durationSeconds)}</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+import VoicePlayback from "./detail/VoicePlayback";
+import { formatDuration } from "./detail/formatDuration";
+import DetailHeader from "./detail/DetailHeader";
+import DetailInfoPanel from "./detail/DetailInfoPanel";
+import MessageBubble from "./detail/MessageBubble";
 
 function Detail({
   chat,
@@ -565,97 +425,12 @@ function Detail({
             </div>
           ) : (
             chatMessages.map((message, index) => (
-              <div
+              <MessageBubble
                 key={`${message.id || "msg"}-${index}`}
-                className={`w-fit max-w-[92%] break-words rounded-2xl px-3 py-2 text-sm text-white shadow sm:max-w-[85%] md:max-w-[75%] ${
-                  message.fromMe
-                    ? "ml-auto bg-[#6ca56a]/80 text-right"
-                    : "mr-auto bg-white/25"
-                }`}
-              >
-                {message.imageUrl ? (
-                  <a
-                    href={message.imageUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="block"
-                  >
-                    <img
-                      src={message.imageUrl}
-                      alt="Shared"
-                      className="max-h-72 w-full min-w-[180px] rounded-xl object-cover"
-                      loading="lazy"
-                    />
-                  </a>
-                ) : null}
-                {message.text ? (
-                  <p className={message.imageUrl ? "mt-2" : ""}>
-                    {message.text}
-                  </p>
-                ) : null}
-                {message.audioUrl ? (
-                  <VoicePlayback
-                    src={message.audioUrl}
-                    className={
-                      message.text || message.imageUrl
-                        ? "mt-2 w-full min-w-[160px] sm:min-w-[240px]"
-                        : "w-full min-w-[160px] sm:min-w-[240px]"
-                    }
-                  />
-                ) : null}
-                <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-white/65">
-                  {!message.fromMe && !message.read && (
-                    <span className="rounded-full border border-white/25 bg-white/10 px-2 py-0.5 text-[9px] uppercase tracking-wide text-white/80">
-                      New
-                    </span>
-                  )}
-                  <div className="ml-auto flex items-center gap-1">
-                    <span>{message.timestamp || chat.time}</span>
-                    {message.fromMe &&
-                      (message.read ? (
-                        <span className="flex items-center text-lime-300">
-                          <svg
-                            className="h-3 w-3"
-                            fill="currentColor"
-                            viewBox="0 0 20 20"
-                          >
-                            <path d="M7.629 13.314a1 1 0 01-1.414 0L3.293 10.39a1 1 0 011.414-1.414l2.209 2.21 5.791-5.792a1 1 0 011.414 1.414l-6.492 6.506z" />
-                          </svg>
-                          <svg
-                            className="-ml-1 h-3 w-3"
-                            fill="currentColor"
-                            viewBox="0 0 20 20"
-                          >
-                            <path d="M7.629 13.314a1 1 0 01-1.414 0L3.293 10.39a1 1 0 011.414-1.414l2.209 2.21 5.791-5.792a1 1 0 011.414 1.414l-6.492 6.506z" />
-                          </svg>
-                        </span>
-                      ) : message.id ? (
-                        <svg
-                          className="h-3 w-3 text-white/60"
-                          fill="currentColor"
-                          viewBox="0 0 20 20"
-                        >
-                          <path d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" />
-                        </svg>
-                      ) : (
-                        <svg
-                          className="h-3 w-3 text-white/50"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={1.8}
-                            d="M12 6v6l4 2"
-                          />
-                          <circle cx="12" cy="12" r="9" strokeWidth={1.8} />
-                        </svg>
-                      ))}
-                  </div>
-                </div>
-              </div>
+                bubbleKey={`${message.id || "msg"}-${index}`}
+                message={message}
+                fallbackTime={chat.time}
+              />
             ))
           )}
         </div>
@@ -883,43 +658,7 @@ function Detail({
 
   // ── Info panel ─────────────────────────────────────────────────────────────
   const infoContent = (
-    <aside className="h-full overflow-y-auto rounded-2xl border border-white/20 bg-white/12 p-4">
-      <div className="mb-6 flex items-center gap-4">
-        <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white/30 text-2xl font-semibold text-white">
-          {chat.image ? (
-            <img
-              src={chat.image}
-              alt={chat.name || "User"}
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            avatarInitial
-          )}
-        </div>
-        <div className="min-w-0">
-          <h3 className="truncate text-lg font-semibold text-white">
-            {chat.name}
-          </h3>
-          <p className="text-sm text-white/70">{chat.status}</p>
-        </div>
-      </div>
-
-      <div className="space-y-3 text-sm text-white/90">
-        {[
-          { label: "Phone", value: chat.phone ?? "+1 000 000 0000" },
-          { label: "Role", value: chat.role ?? "Team member" },
-          { label: "Status", value: chat.lastSeen },
-        ].map(({ label, value }) => (
-          <div
-            key={label}
-            className="rounded-lg border border-white/20 bg-black/20 p-3"
-          >
-            <p className="text-[11px] text-white/60">{label}</p>
-            <p className="text-white">{value}</p>
-          </div>
-        ))}
-      </div>
-    </aside>
+    <DetailInfoPanel chat={chat} avatarInitial={avatarInitial} />
   );
 
   // ── Root layout ────────────────────────────────────────────────────────────
@@ -927,46 +666,14 @@ function Detail({
     <section className="flex h-full flex-1 flex-col overflow-hidden bg-[#15261d]/35 p-3 md:p-5">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {/* Header — shrink-0 so it never collapses */}
-        <header className="mb-3 shrink-0 flex items-center justify-between gap-2 rounded-2xl border border-white/20 bg-white/12 px-3 py-2.5 sm:mb-4 sm:px-4 sm:py-3 md:px-5">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white/30 text-base font-semibold text-white">
-              {chat.image ? (
-                <img
-                  src={chat.image}
-                  alt={chat.name || "User"}
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                avatarInitial
-              )}
-            </div>
-            <div className="min-w-0">
-              <h2 className="truncate text-lg font-semibold tracking-tight text-white">
-                {chat.name}
-              </h2>
-              <div className="mt-0.5 flex flex-wrap items-center gap-2 text-sm text-white/70">
-                <span
-                  className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide ${connectionTone}`}
-                >
-                  {connectionLabel}
-                </span>
-              </div>
-            </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={toggleInfoPanel}
-              className={`rounded-md border px-2 py-1 text-xs text-white/90 ${
-                isInfoOpen
-                  ? "border-lime-300/70 bg-lime-200/20"
-                  : "border-white/20 bg-white/10"
-              }`}
-            >
-              {isInfoOpen ? "Hide Info" : "Info"}
-            </button>
-          </div>
-        </header>
+        <DetailHeader
+          chat={chat}
+          avatarInitial={avatarInitial}
+          connectionLabel={connectionLabel}
+          connectionTone={connectionTone}
+          isInfoOpen={isInfoOpen}
+          onToggleInfo={toggleInfoPanel}
+        />
 
         {/* Mobile: toggle between messages and info */}
         <div className="min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden md:hidden">

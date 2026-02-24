@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { API_BASE_URL } from "../lib/apiBaseUrl";
+import { normalizeEmail, parsePayload } from "./auth/authUtils";
 
 function Auth({ onAuthSuccess }) {
   const [authMode, setAuthMode] = useState("signin");
@@ -19,22 +20,6 @@ function Auth({ onAuthSuccess }) {
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
-
-  const parsePayload = async (response) => {
-    const text = await response.text();
-
-    if (!text) {
-      return {};
-    }
-
-    try {
-      return JSON.parse(text);
-    } catch {
-      return { message: text };
-    }
-  };
-
-  const normalizeEmail = (value = "") => value.trim().toLowerCase();
 
   const handleSwitchMode = (nextMode) => {
     setAuthMode(nextMode);

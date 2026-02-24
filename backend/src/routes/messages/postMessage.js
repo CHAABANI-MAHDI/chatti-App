@@ -1,10 +1,11 @@
+const {
+  buildMessageSelectedColumns,
+  hasSchemaColumnError,
+  isUuid,
+} = require("./messageRouteUtils");
+
 const registerPostMessageRoute = (app, ctx) => {
   app.post("/messages", async (req, res) => {
-    const isUuid = (value = "") =>
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-        String(value || "").trim(),
-      );
-
     const profileClient = ctx.getProfileClient(req);
     if (!profileClient) {
       return res.status(500).json({
@@ -195,13 +196,7 @@ const registerPostMessageRoute = (app, ctx) => {
 
         conversationError = error;
 
-        const lowerMessage = String(error?.message || "").toLowerCase();
-        const hasUnknownColumnError =
-          lowerMessage.includes("could not find") ||
-          lowerMessage.includes("column") ||
-          lowerMessage.includes("schema cache");
-
-        if (!hasUnknownColumnError) {
+        if (!hasSchemaColumnError(error)) {
           break;
         }
       }
@@ -252,13 +247,7 @@ const registerPostMessageRoute = (app, ctx) => {
 
         membersInsertError = error;
 
-        const lowerMessage = String(error?.message || "").toLowerCase();
-        const hasUnknownColumnError =
-          lowerMessage.includes("could not find") ||
-          lowerMessage.includes("column") ||
-          lowerMessage.includes("schema cache");
-
-        if (!hasUnknownColumnError) {
+        if (!hasSchemaColumnError(error)) {
           break;
         }
       }
@@ -380,15 +369,7 @@ const registerPostMessageRoute = (app, ctx) => {
       insertPayload[messageColumns.audioColumn] = storedAudioPath || null;
     }
 
-    const selectedColumns = [
-      "id",
-      messageColumns.senderColumn,
-      "conversation_id",
-      messageColumns.bodyColumn,
-      "created_at",
-      ...(messageColumns.imageColumn ? [messageColumns.imageColumn] : []),
-      ...(messageColumns.audioColumn ? [messageColumns.audioColumn] : []),
-    ];
+    const selectedColumns = buildMessageSelectedColumns(messageColumns);
 
     const { data, error } = await profileClient
       .from(ctx.messagesTable)

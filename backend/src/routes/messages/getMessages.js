@@ -1,10 +1,7 @@
+const { buildMessageSelectedColumns, isUuid } = require("./messageRouteUtils");
+
 const registerGetMessagesRoute = (app, ctx) => {
   app.get("/messages", async (req, res) => {
-    const isUuid = (value = "") =>
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-        String(value || "").trim(),
-      );
-
     const profileClient = ctx.getProfileClient(req);
     if (!profileClient) {
       return res.status(500).json({
@@ -132,15 +129,7 @@ const registerGetMessagesRoute = (app, ctx) => {
       return res.status(200).json({ messages: [] });
     }
 
-    const selectedColumns = [
-      "id",
-      messageColumns.senderColumn,
-      "conversation_id",
-      messageColumns.bodyColumn,
-      "created_at",
-      ...(messageColumns.imageColumn ? [messageColumns.imageColumn] : []),
-      ...(messageColumns.audioColumn ? [messageColumns.audioColumn] : []),
-    ];
+    const selectedColumns = buildMessageSelectedColumns(messageColumns);
 
     const { data, error } = await profileClient
       .from(ctx.messagesTable)
