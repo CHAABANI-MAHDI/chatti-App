@@ -14,6 +14,8 @@ const registerAddContactRoute = require("./contacts/addContact");
 const registerGetConversationsRoute = require("./conversations/getConversations");
 const registerGetMessagesRoute = require("./messages/getMessages");
 const registerPostMessageRoute = require("./messages/postMessage");
+const registerUpdateMessageRoute = require("./messages/updateMessage");
+const registerDeleteMessageRoute = require("./messages/deleteMessage");
 const registerMarkReadRoute = require("./messages/markRead");
 
 const registerRoutes = (app, ctx) => {
@@ -38,6 +40,8 @@ const registerRoutes = (app, ctx) => {
 
   registerGetMessagesRoute(app, ctx);
   registerPostMessageRoute(app, ctx);
+  registerUpdateMessageRoute(app, ctx);
+  registerDeleteMessageRoute(app, ctx);
   registerMarkReadRoute(app, ctx);
 };
 

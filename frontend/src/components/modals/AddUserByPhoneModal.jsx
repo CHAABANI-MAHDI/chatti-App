@@ -23,6 +23,9 @@ function AddUserByPhoneModal({
     nextOffset: 0,
     hasMore: false,
   });
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [toastMessage, setToastMessage] = useState("");
+  const [toastTone, setToastTone] = useState("success");
   const [status, setStatus] = useState("idle");
   const [errorMessage, setErrorMessage] = useState("");
   const requestIdRef = useRef(0);
@@ -45,6 +48,8 @@ function AddUserByPhoneModal({
       setHideAddedUsers(false);
       setIsLoadingMore(false);
       setPagination({ nextOffset: 0, hasMore: false });
+      setActiveIndex(0);
+      setToastMessage("");
       setStatus("idle");
       setErrorMessage("");
     }
@@ -57,6 +62,10 @@ function AddUserByPhoneModal({
 
     return profiles.filter((profile) => !existingIdSet.has(profile.id));
   }, [profiles, hideAddedUsers, existingIdSet]);
+
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [normalizedQuery, hideAddedUsers, visibleProfiles.length]);
 
   const extractSearchPayload = (result) => {
     const fallbackProfiles = Array.isArray(result)
@@ -168,14 +177,29 @@ function AddUserByPhoneModal({
     try {
       setAddingUserId(profile.id);
       await onAddUser(profile);
-      onClose();
+      setToastTone("success");
+      setToastMessage("User added to chat list.");
     } catch (error) {
       setStatus("error");
       setErrorMessage(error.message || "Failed to add user.");
+      setToastTone("error");
+      setToastMessage("Failed to add user.");
     } finally {
       setAddingUserId("");
     }
   };
+
+  useEffect(() => {
+    if (!toastMessage) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => {
+      setToastMessage("");
+    }, 2200);
+
+    return () => window.clearTimeout(timer);
+  }, [toastMessage]);
 
   return (
     <OverlayModal
@@ -189,6 +213,17 @@ function AddUserByPhoneModal({
       <h3 className="text-base font-semibold text-white sm:text-lg">
         Invite user
       </h3>
+      {toastMessage ? (
+        <div
+          className={`mt-2 rounded-lg border px-3 py-2 text-xs ${
+            toastTone === "error"
+              ? "border-rose-300/60 bg-rose-300/10 text-rose-100"
+              : "border-lime-300/60 bg-lime-200/15 text-lime-100"
+          }`}
+        >
+          {toastMessage}
+        </div>
+      ) : null}
       <p className="mt-1 text-xs text-white/70">
         Search by name or email and invite to start chatting.
       </p>
@@ -197,6 +232,31 @@ function AddUserByPhoneModal({
         type="text"
         value={queryInput}
         onChange={(event) => setQueryInput(event.target.value)}
+        onKeyDown={(event) => {
+          if (!visibleProfiles.length) {
+            return;
+          }
+
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            setActiveIndex((prev) =>
+              Math.min(prev + 1, visibleProfiles.length - 1),
+            );
+          }
+
+          if (event.key === "ArrowUp") {
+            event.preventDefault();
+            setActiveIndex((prev) => Math.max(prev - 1, 0));
+          }
+
+          if (event.key === "Enter") {
+            event.preventDefault();
+            const target = visibleProfiles[activeIndex];
+            if (target) {
+              handleAdd(target);
+            }
+          }
+        }}
         placeholder="Search users..."
         className="mt-3 w-full rounded-xl border border-white/20 bg-black/20 px-3 py-2 text-xs text-white placeholder:text-white/55 outline-none transition-colors focus:border-lime-200/45 sm:text-sm"
       />
@@ -225,16 +285,21 @@ function AddUserByPhoneModal({
 
       {visibleProfiles.length > 0 && (
         <div className="mt-3 max-h-[48dvh] space-y-2 overflow-y-auto pr-1">
-          {visibleProfiles.map((profile) => {
+          {visibleProfiles.map((profile, index) => {
             const profileInitial =
               profile?.name?.trim()?.charAt(0)?.toUpperCase() || "U";
             const alreadyAdded = existingIdSet.has(profile.id);
             const isAdding = addingUserId === profile.id;
+            const isActive = index === activeIndex;
 
             return (
               <div
                 key={profile.id}
-                className="flex items-center gap-3 rounded-xl border border-white/20 bg-black/20 p-2.5"
+                className={`flex items-center gap-3 rounded-xl border p-2.5 ${
+                  isActive
+                    ? "border-lime-300/60 bg-lime-200/10"
+                    : "border-white/20 bg-black/20"
+                }`}
               >
                 <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white/25 text-sm font-semibold text-white">
                   {profile.image ? (

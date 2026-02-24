@@ -3,6 +3,7 @@ function DetailHeader({
   avatarInitial,
   connectionLabel,
   connectionTone,
+  statusText,
   isInfoOpen,
   onToggleInfo,
 }) {
@@ -30,6 +31,9 @@ function DetailHeader({
             >
               {connectionLabel}
             </span>
+            {statusText ? (
+              <span className="text-xs text-white/70">{statusText}</span>
+            ) : null}
           </div>
         </div>
       </div>

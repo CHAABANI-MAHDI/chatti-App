@@ -19,6 +19,7 @@ const registerPostMessageRoute = (app, ctx) => {
     const body = String(req.body?.text || "").trim();
     const rawImageDataUrl = String(req.body?.imageDataUrl || "").trim();
     const rawAudioDataUrl = String(req.body?.audioDataUrl || "").trim();
+    const clientId = String(req.body?.clientId || "").trim();
 
     const hasSenderId = isUuid(rawSenderId);
     const hasReceiverId = isUuid(rawReceiverId);
@@ -409,6 +410,7 @@ const registerPostMessageRoute = (app, ctx) => {
     if (typeof ctx.emitMessageCreated === "function") {
       ctx.emitMessageCreated({
         id: data?.id || null,
+        clientId: clientId || null,
         text: resolvedText,
         imageUrl: resolvedImageUrl,
         audioUrl: resolvedAudioUrl,
@@ -422,6 +424,7 @@ const registerPostMessageRoute = (app, ctx) => {
     return res.status(201).json({
       message: {
         id: data?.id || null,
+        clientId: clientId || null,
         text: resolvedText,
         imageUrl: resolvedImageUrl,
         audioUrl: resolvedAudioUrl,

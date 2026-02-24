@@ -129,11 +129,15 @@ function List({
           />
           <button
             type="button"
-            title="Add new user"
+            title="Invite user"
+            aria-label="Invite user"
             onClick={() => setIsAddUserOpen(true)}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/20 bg-white/10 text-lg leading-none text-white/90 transition-colors hover:bg-white/15"
+            className="group flex h-11 min-w-[46px] shrink-0 items-center justify-center rounded-xl border border-lime-300/65 bg-lime-300/30 px-3 text-xl font-semibold leading-none text-lime-50 shadow-[0_0_0_1px_rgba(163,230,53,0.15)] transition-colors hover:bg-lime-300/40"
           >
-            +
+            <span>+</span>
+            <span className="ml-1 hidden text-[11px] font-semibold uppercase tracking-wide text-lime-100/95 lg:inline">
+              Invite
+            </span>
           </button>
         </div>
       </div>

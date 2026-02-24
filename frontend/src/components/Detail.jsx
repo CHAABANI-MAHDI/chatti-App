@@ -6,9 +6,101 @@ import DetailHeader from "./detail/DetailHeader";
 import DetailInfoPanel from "./detail/DetailInfoPanel";
 import MessageBubble from "./detail/MessageBubble";
 
+const MAX_IMAGE_SIZE_BYTES = 6 * 1024 * 1024;
+const TARGET_IMAGE_MAX_SIDE = 1600;
+const TARGET_IMAGE_QUALITY = 0.78;
+
+const loadImageElement = (file) =>
+  new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Failed to read image."));
+    };
+    image.src = objectUrl;
+  });
+
+const canvasToBlob = (canvas, mimeType, quality) =>
+  new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          reject(new Error("Failed to process image."));
+          return;
+        }
+        resolve(blob);
+      },
+      mimeType,
+      quality,
+    );
+  });
+
+const blobToDataUrl = (blob) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      resolve(typeof reader.result === "string" ? reader.result : "");
+    };
+    reader.onerror = () => reject(new Error("Failed to convert image."));
+    reader.readAsDataURL(blob);
+  });
+
+const compressImageFile = async (file) => {
+  const image = await loadImageElement(file);
+
+  const maxSide = Math.max(image.width, image.height);
+  const scale =
+    maxSide > TARGET_IMAGE_MAX_SIDE ? TARGET_IMAGE_MAX_SIDE / maxSide : 1;
+  const targetWidth = Math.max(1, Math.round(image.width * scale));
+  const targetHeight = Math.max(1, Math.round(image.height * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Image processing is not supported in this browser.");
+  }
+
+  context.drawImage(image, 0, 0, targetWidth, targetHeight);
+
+  const preferredMimeType =
+    file.type === "image/png" ? "image/webp" : "image/jpeg";
+  let blob = await canvasToBlob(
+    canvas,
+    preferredMimeType,
+    TARGET_IMAGE_QUALITY,
+  );
+
+  if (blob.size > MAX_IMAGE_SIZE_BYTES) {
+    blob = await canvasToBlob(canvas, "image/jpeg", 0.68);
+  }
+
+  const dataUrl = await blobToDataUrl(blob);
+  return {
+    dataUrl,
+    size: blob.size,
+    width: targetWidth,
+    height: targetHeight,
+  };
+};
+
 function Detail({
   chat,
   onSendMessage,
+  onEditMessage,
+  onDeleteMessage,
+  onRetryFailedMessage,
+  onRetryConnection,
+  onTypingChange,
+  apiErrorMessage = "",
+  isContactTyping = false,
   sendingMessage = false,
   socketStatus = "disconnected",
 }) {
@@ -19,6 +111,7 @@ function Detail({
   const [pendingAudioDataUrl, setPendingAudioDataUrl] = useState("");
   const [pendingAudioName, setPendingAudioName] = useState("");
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
+  const [isAttachMenuOpen, setIsAttachMenuOpen] = useState(false);
   const [recordingElapsedSeconds, setRecordingElapsedSeconds] = useState(0);
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   const [newMessageCount, setNewMessageCount] = useState(0);
@@ -38,16 +131,26 @@ function Detail({
   const chatMessages = Array.isArray(chat?.messages) ? chat.messages : [];
   const lastMessage = chatMessages[chatMessages.length - 1] || null;
   const sharedImages = useMemo(() => {
-    const uniqueImages = new Set();
+    const uniqueImages = new Map();
 
     for (let index = chatMessages.length - 1; index >= 0; index -= 1) {
       const imageUrl = String(chatMessages[index]?.imageUrl || "").trim();
-      if (imageUrl) {
-        uniqueImages.add(imageUrl);
+      if (!imageUrl) {
+        continue;
+      }
+
+      const createdAt =
+        chatMessages[index]?.createdAt || chatMessages[index]?.timestamp || "";
+
+      if (!uniqueImages.has(imageUrl)) {
+        uniqueImages.set(imageUrl, {
+          url: imageUrl,
+          createdAt,
+        });
       }
     }
 
-    return Array.from(uniqueImages);
+    return Array.from(uniqueImages.values());
   }, [chatMessages]);
 
   // Reset state when switching chats
@@ -64,6 +167,7 @@ function Detail({
     setPendingAudioDataUrl("");
     setPendingAudioName("");
     setIsRecordingAudio(false);
+    setIsAttachMenuOpen(false);
     setRecordingElapsedSeconds(0);
     setIsEmojiPickerOpen(false);
     setNewMessageCount(0);
@@ -117,6 +221,20 @@ function Detail({
 
     return () => window.cancelAnimationFrame(frame);
   }, [isInfoOpen]);
+
+  useEffect(() => {
+    const recentImageUrls = chatMessages
+      .filter((message) => String(message?.imageUrl || "").trim())
+      .slice(-8)
+      .map((message) => String(message.imageUrl || "").trim());
+
+    recentImageUrls.forEach((url) => {
+      const preload = new Image();
+      preload.decoding = "async";
+      preload.loading = "eager";
+      preload.src = url;
+    });
+  }, [chatMessages]);
 
   useEffect(() => {
     if (!isRecordingAudio) {
@@ -195,7 +313,7 @@ function Detail({
     setPendingAudioName("");
   };
 
-  const handlePickImage = (event) => {
+  const handlePickImage = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -209,20 +327,25 @@ function Detail({
       return;
     }
 
-    if (file.size > 6 * 1024 * 1024) {
-      alert("Image is too large. Max allowed size is 6MB.");
+    if (file.size > 16 * 1024 * 1024) {
+      alert("Image is too large. Max allowed size is 16MB.");
       clearPendingImage();
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      setPendingImageDataUrl(
-        typeof reader.result === "string" ? reader.result : "",
-      );
-      setPendingImageName(file.name || "image");
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressed = await compressImageFile(file);
+      if (!compressed?.dataUrl) {
+        throw new Error("Failed to process image.");
+      }
+
+      setPendingImageDataUrl(compressed.dataUrl);
+      const sizeKb = Math.max(1, Math.round(compressed.size / 1024));
+      setPendingImageName(`${file.name || "image"} • ${sizeKb} KB`);
+    } catch (error) {
+      alert(error.message || "Failed to prepare image.");
+      clearPendingImage();
+    }
   };
 
   const handleEmojiSelect = (emojiData) => {
@@ -353,16 +476,18 @@ function Detail({
       sendingMessage
     )
       return;
+    const imageSnapshot = pendingImageDataUrl;
+    const audioSnapshot = pendingAudioDataUrl;
     try {
-      await onSendMessage?.(chat, {
-        text,
-        imageDataUrl: pendingImageDataUrl,
-        audioDataUrl: pendingAudioDataUrl,
-      });
       setMessageText("");
       clearPendingImage();
       clearPendingAudio();
       setIsEmojiPickerOpen(false);
+      await onSendMessage?.(chat, {
+        text,
+        imageDataUrl: imageSnapshot,
+        audioDataUrl: audioSnapshot,
+      });
       window.requestAnimationFrame(() => {
         inputRef.current?.focus();
       });
@@ -378,6 +503,45 @@ function Detail({
     }
 
     setIsInfoOpen((prev) => !prev);
+  };
+
+  const handleEditBubbleMessage = async (message) => {
+    if (!message?.fromMe || !message?.id) {
+      return;
+    }
+
+    const currentText = String(message.text || "");
+    const nextText = window.prompt("Edit message", currentText);
+    if (nextText === null) {
+      return;
+    }
+
+    if (String(nextText).trim() === currentText.trim()) {
+      return;
+    }
+
+    try {
+      await onEditMessage?.(chat.id, message, nextText);
+    } catch (error) {
+      alert(error.message || "Failed to edit message.");
+    }
+  };
+
+  const handleDeleteBubbleMessage = async (message) => {
+    if (!message?.fromMe || !message?.id) {
+      return;
+    }
+
+    const confirmed = window.confirm("Delete this message?");
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await onDeleteMessage?.(chat.id, message);
+    } catch (error) {
+      alert(error.message || "Failed to delete message.");
+    }
   };
 
   // ── Empty state ────────────────────────────────────────────────────────────
@@ -411,12 +575,37 @@ function Detail({
         : socketStatus === "error"
           ? "border-rose-300/60 bg-rose-200/15 text-rose-100"
           : "border-white/25 bg-white/10 text-white/75";
+  const statusText = isContactTyping
+    ? "typing..."
+    : chat.lastSeen || (chat.status === "Online" ? "Online now" : "Offline");
 
   // ── Messages + input ───────────────────────────────────────────────────────
   // CRITICAL: overflow-hidden on the flex wrapper prevents ml-auto bubbles from
   // leaking outside. The inner div handles vertical scrolling on its own.
   const messagesContent = (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden gap-2">
+      {(apiErrorMessage || socketStatus !== "connected") && (
+        <div className="rounded-xl border border-white/20 bg-black/25 px-3 py-2 text-xs text-white/80">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span>
+              {apiErrorMessage ||
+                (socketStatus === "reconnecting" ||
+                socketStatus === "connecting"
+                  ? "Reconnecting..."
+                  : socketStatus === "error"
+                    ? "Connection error."
+                    : "Offline. Messages will retry when back online.")}
+            </span>
+            <button
+              type="button"
+              onClick={onRetryConnection}
+              className="rounded-md border border-white/25 bg-white/10 px-2 py-1 text-[11px] text-white/85 hover:bg-white/15"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      )}
       {/* Scrollable message list */}
       <div
         ref={messagesContainerRef}
@@ -442,6 +631,9 @@ function Detail({
                 bubbleKey={`${message.id || "msg"}-${index}`}
                 message={message}
                 fallbackTime={chat.time}
+                onRetry={() => onRetryFailedMessage?.(chat.id, message)}
+                onEdit={() => handleEditBubbleMessage(message)}
+                onDelete={() => handleDeleteBubbleMessage(message)}
               />
             ))
           )}
@@ -476,58 +668,60 @@ function Detail({
           className="hidden"
           onChange={handlePickImage}
         />
-        <button
-          type="button"
-          title="Send image"
-          onClick={() => imageInputRef.current?.click()}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/20 bg-white/10 text-white/90 transition-colors hover:bg-white/15"
-        >
-          <svg
-            className="h-4 w-4"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
+        <div className="relative shrink-0">
+          <button
+            type="button"
+            title="Add attachment"
+            onClick={() => setIsAttachMenuOpen((previous) => !previous)}
+            className={`flex h-9 w-9 items-center justify-center rounded-lg border text-white/90 transition-colors ${
+              isAttachMenuOpen
+                ? "border-lime-300/60 bg-lime-200/15"
+                : "border-white/20 bg-white/10 hover:bg-white/15"
+            }`}
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.8}
-              d="M4 16l4.5-4.5a2 2 0 012.828 0L16 16m-2-2l1.5-1.5a2 2 0 012.828 0L20 14M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2zm4-10h.01"
-            />
-          </svg>
-        </button>
+            <span className="text-lg leading-none">+</span>
+          </button>
 
-        <button
-          type="button"
-          title={isRecordingAudio ? "Stop recording" : "Record voice message"}
-          onClick={isRecordingAudio ? stopAudioRecording : startAudioRecording}
-          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border text-white/90 transition-colors ${
-            isRecordingAudio
-              ? "border-rose-300/60 bg-rose-300/20 hover:bg-rose-300/25"
-              : "border-white/20 bg-white/10 hover:bg-white/15"
-          }`}
-        >
-          <svg
-            className="h-4 w-4"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.8}
-              d="M12 5a2.5 2.5 0 00-2.5 2.5v4a2.5 2.5 0 005 0v-4A2.5 2.5 0 0012 5zm-5 6.5a5 5 0 0010 0M12 17v3m-3 0h6"
-            />
-          </svg>
-        </button>
+          {isAttachMenuOpen && (
+            <div className="absolute bottom-11 left-0 z-20 w-32 space-y-1 rounded-lg border border-white/20 bg-[#0f1a14]/95 p-1.5 shadow-xl">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsAttachMenuOpen(false);
+                  imageInputRef.current?.click();
+                }}
+                className="w-full rounded-md px-2 py-1.5 text-left text-xs text-white/90 hover:bg-white/10"
+              >
+                Add image
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsAttachMenuOpen(false);
+                  if (isRecordingAudio) {
+                    stopAudioRecording();
+                  } else {
+                    startAudioRecording();
+                  }
+                }}
+                className="w-full rounded-md px-2 py-1.5 text-left text-xs text-white/90 hover:bg-white/10"
+              >
+                {isRecordingAudio ? "Stop voice" : "Voice message"}
+              </button>
+            </div>
+          )}
+        </div>
 
         <input
           ref={inputRef}
           type="text"
           placeholder="Type your message..."
           value={messageText}
-          onChange={(e) => setMessageText(e.target.value)}
+          onChange={(e) => {
+            const nextValue = e.target.value;
+            setMessageText(nextValue);
+            onTypingChange?.(chat.id, nextValue);
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -687,6 +881,7 @@ function Detail({
           avatarInitial={avatarInitial}
           connectionLabel={connectionLabel}
           connectionTone={connectionTone}
+          statusText={statusText}
           isInfoOpen={isInfoOpen}
           onToggleInfo={toggleInfoPanel}
         />

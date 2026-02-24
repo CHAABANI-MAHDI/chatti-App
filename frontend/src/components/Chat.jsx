@@ -21,10 +21,84 @@ import {
 } from "./chat/chatUtils";
 
 const APP_PREFERENCES_KEY = "relatime-chat-preferences";
+const APP_CHAT_CACHE_PREFIX = "relatime-chat-cache";
 const DEFAULT_PREFERENCES = {
   showMessagePreview: true,
   showUnreadBadge: true,
   muteNotifications: false,
+};
+
+const toCacheKey = (userId = "") =>
+  `${APP_CHAT_CACHE_PREFIX}:${String(userId || "").trim()}`;
+
+const sanitizeMessagesForCache = (messages = []) =>
+  (Array.isArray(messages) ? messages : []).slice(-60).map((message) => {
+    const imageUrl = String(message?.imageUrl || "");
+    const audioUrl = String(message?.audioUrl || "");
+
+    return {
+      id: message?.id || null,
+      text: String(message?.text || ""),
+      imageUrl: imageUrl.startsWith("data:") ? "" : imageUrl,
+      audioUrl: audioUrl.startsWith("data:") ? "" : audioUrl,
+      timestamp: message?.timestamp || "",
+      createdAt: message?.createdAt || null,
+      fromMe: Boolean(message?.fromMe),
+      read: Boolean(message?.read),
+      readAt: message?.readAt || null,
+      pending: Boolean(message?.pending),
+      failed: Boolean(message?.failed),
+      clientId: message?.clientId || null,
+      deliveredAt: message?.deliveredAt || null,
+    };
+  });
+
+const readCachedChats = (userId = "") => {
+  const key = toCacheKey(userId);
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) {
+      return { chats: [], selectedChatId: null };
+    }
+
+    const parsed = JSON.parse(raw);
+    const chats = Array.isArray(parsed?.chats)
+      ? parsed.chats.map((chat) => ({
+          ...chat,
+          messages: sanitizeMessagesForCache(chat?.messages || []),
+        }))
+      : [];
+
+    return {
+      chats,
+      selectedChatId: parsed?.selectedChatId || null,
+    };
+  } catch {
+    return { chats: [], selectedChatId: null };
+  }
+};
+
+const writeCachedChats = (userId = "", chats = [], selectedChatId = null) => {
+  const key = toCacheKey(userId);
+  const safeChats = (Array.isArray(chats) ? chats : [])
+    .slice(0, 40)
+    .map((chat) => ({
+      ...chat,
+      messages: sanitizeMessagesForCache(chat?.messages || []),
+    }));
+
+  try {
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        chats: safeChats,
+        selectedChatId,
+        updatedAt: Date.now(),
+      }),
+    );
+  } catch {
+    // Intentionally ignored
+  }
 };
 
 const readStoredPreferences = () => {
@@ -42,6 +116,34 @@ const readStoredPreferences = () => {
   } catch {
     return DEFAULT_PREFERENCES;
   }
+};
+
+const recalculateChatSummary = (messages = []) => {
+  const list = Array.isArray(messages) ? messages : [];
+  const latest = list[list.length - 1] || null;
+
+  if (!latest) {
+    return {
+      lastMessage: "",
+      lastMessageFromMe: false,
+      lastMessageAt: null,
+      time: "",
+    };
+  }
+
+  const lastMessageAt =
+    latest.createdAt || latest.rawTimestamp || latest.timestamp || null;
+
+  return {
+    lastMessage: buildLastMessagePreview({
+      text: latest.text,
+      imageUrl: latest.imageUrl,
+      audioUrl: latest.audioUrl,
+    }),
+    lastMessageFromMe: Boolean(latest.fromMe),
+    lastMessageAt,
+    time: formatTime(lastMessageAt),
+  };
 };
 
 function Chat({ currentUser, onLogout, onProfileSave }) {
@@ -66,6 +168,8 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
   const [isMobileSettingsOpen, setIsMobileSettingsOpen] = useState(false);
   const [isMobileAddUserOpen, setIsMobileAddUserOpen] = useState(false);
   const [preferences, setPreferences] = useState(readStoredPreferences);
+  const [apiErrorMessage, setApiErrorMessage] = useState("");
+  const [typingByChatId, setTypingByChatId] = useState({});
 
   const socketRef = useRef(null);
   const isSendingMessageRef = useRef(false);
@@ -75,10 +179,15 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
   const fetchConversationsRef = useRef(async () => {});
   const markConversationAsReadRef = useRef(async () => {});
   const preferencesRef = useRef(preferences);
+  const typingDebounceRef = useRef({});
+  const autoRetryInProgressRef = useRef(false);
 
   const selectedChat = useMemo(
     () => chats.find((chat) => chat.id === selectedChatId) ?? null,
     [chats, selectedChatId],
+  );
+  const selectedChatIsTyping = Boolean(
+    selectedChat?.id && typingByChatId[selectedChat.id],
   );
 
   const filteredMobileChats = useMemo(() => {
@@ -111,11 +220,108 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
     }
   }, [preferences]);
 
+  useEffect(() => {
+    if (!effectiveUserId) {
+      return;
+    }
+
+    const cached = readCachedChats(effectiveUserId);
+    if (cached.chats.length) {
+      setChats(cached.chats);
+      if (cached.selectedChatId) {
+        setSelectedChatId(cached.selectedChatId);
+      }
+    }
+  }, [effectiveUserId]);
+
+  useEffect(() => {
+    if (!effectiveUserId) {
+      return;
+    }
+
+    writeCachedChats(effectiveUserId, chats, selectedChatId);
+  }, [effectiveUserId, chats, selectedChatId]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(typingDebounceRef.current || {}).forEach((timerId) => {
+        if (timerId) {
+          window.clearTimeout(timerId);
+        }
+      });
+    };
+  }, []);
+
   const handleAuthExpired = (message = "") => {
     if (authExpiredHandledRef.current) return;
     authExpiredHandledRef.current = true;
     alert(message || "Session expired. Please sign in again.");
     onLogout?.();
+  };
+
+  const toFriendlyNetworkError = (error = null, fallbackMessage = "") => {
+    const message = String(error?.message || fallbackMessage || "").trim();
+    if (!message) {
+      return "Network request failed.";
+    }
+
+    if (/failed to fetch|networkerror|network request failed/i.test(message)) {
+      return "You appear to be offline. Check your connection and retry.";
+    }
+
+    return message;
+  };
+
+  const emitTypingSignal = (contactId, isTyping) => {
+    const nextContactId = String(contactId || "").trim();
+    if (!nextContactId || !effectiveUserId) {
+      return;
+    }
+
+    const socket = socketRef.current;
+    if (!socket?.connected) {
+      return;
+    }
+
+    socket.emit("chat:typing", {
+      fromUserId: effectiveUserId,
+      toUserId: nextContactId,
+      isTyping: Boolean(isTyping),
+    });
+  };
+
+  const queueTypingSignal = (contactId, value = "") => {
+    const nextContactId = String(contactId || "").trim();
+    if (!nextContactId) {
+      return;
+    }
+
+    emitTypingSignal(nextContactId, Boolean(String(value || "").trim()));
+
+    if (typingDebounceRef.current[nextContactId]) {
+      window.clearTimeout(typingDebounceRef.current[nextContactId]);
+    }
+
+    typingDebounceRef.current[nextContactId] = window.setTimeout(() => {
+      emitTypingSignal(nextContactId, false);
+      typingDebounceRef.current[nextContactId] = null;
+    }, 900);
+  };
+
+  const retryNetworkData = async () => {
+    setApiErrorMessage("");
+    try {
+      await fetchConversationsRef.current();
+    } catch (error) {
+      setApiErrorMessage(
+        toFriendlyNetworkError(error, "Unable to refresh conversations."),
+      );
+    }
+
+    if (socketRef.current && !socketRef.current.connected) {
+      setSocketStatus("reconnecting");
+      socketRef.current.connect();
+    }
   };
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -142,6 +348,8 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
       }
       throw new Error(payload.message || "Failed to load conversations.");
     }
+
+    setApiErrorMessage("");
 
     const nextChats = (payload.conversations || []).map(mapConversationToChat);
 
@@ -212,6 +420,8 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
       throw new Error(payload.message || "Failed to load messages.");
     }
 
+    setApiErrorMessage("");
+
     const sourceMessages = Array.isArray(payload.messages)
       ? payload.messages
       : [];
@@ -271,6 +481,8 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
       throw new Error(payload.message || "Failed to mark messages as read.");
     }
 
+    setApiErrorMessage("");
+
     setChats((prev) =>
       prev.map((chat) =>
         chat.id === contactId
@@ -296,7 +508,12 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
       try {
         await fetchConversations();
       } catch (error) {
-        if (isMounted) console.error(error);
+        if (isMounted) {
+          console.error(error);
+          setApiErrorMessage(
+            toFriendlyNetworkError(error, "Failed to load conversations."),
+          );
+        }
       }
     };
     load();
@@ -323,8 +540,15 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
 
   useEffect(() => {
     if (!selectedChat?.id || !effectiveUserId) return;
-    fetchMessagesForContact(selectedChat.id).catch(console.error);
-    markConversationAsRead(selectedChat.id).catch(console.error);
+    fetchMessagesForContact(selectedChat.id).catch((error) => {
+      console.error(error);
+      setApiErrorMessage(
+        toFriendlyNetworkError(error, "Failed to load messages."),
+      );
+    });
+    markConversationAsRead(selectedChat.id).catch((error) => {
+      console.error(error);
+    });
   }, [selectedChat?.id, effectiveUserId, currentUser?.accessToken]);
 
   useEffect(() => {
@@ -343,6 +567,7 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
 
     const handleConnected = () => {
       setSocketStatus("connected");
+      setApiErrorMessage("");
       socket.emit("chat:join-user", { userId });
     };
     const handleDisconnected = () => {
@@ -353,6 +578,87 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
     };
     const handleConnectError = () => {
       setSocketStatus("error");
+    };
+
+    const handlePresenceSnapshot = (event = {}) => {
+      const onlineUserIds = new Set(
+        (Array.isArray(event?.onlineUserIds) ? event.onlineUserIds : []).map(
+          (id) => String(id || "").trim(),
+        ),
+      );
+      const lastSeenByUser = event?.lastSeenByUser || {};
+
+      setChats((previous) =>
+        previous.map((chat) => {
+          const chatId = String(chat?.id || "").trim();
+          if (!chatId) {
+            return chat;
+          }
+
+          const isOnline = onlineUserIds.has(chatId);
+          const lastSeen = isOnline
+            ? "Online now"
+            : String(lastSeenByUser?.[chatId] || chat.lastSeen || "Offline");
+
+          return {
+            ...chat,
+            status: isOnline ? "Online" : "Offline",
+            lastSeen,
+          };
+        }),
+      );
+    };
+
+    const handlePresenceUpdate = (event = {}) => {
+      const targetUserId = String(event.userId || "").trim();
+      if (!targetUserId) {
+        return;
+      }
+
+      const status = String(event.status || "").trim() || "Offline";
+      const lastSeenRaw = String(event.lastSeen || "").trim();
+
+      setChats((previous) =>
+        previous.map((chat) =>
+          chat.id === targetUserId
+            ? {
+                ...chat,
+                status,
+                lastSeen:
+                  status === "Online"
+                    ? "Online now"
+                    : lastSeenRaw || chat.lastSeen || "Offline",
+              }
+            : chat,
+        ),
+      );
+    };
+
+    const handleTyping = (event = {}) => {
+      const fromUserId = String(event.fromUserId || "").trim();
+      if (!fromUserId || fromUserId === userId) {
+        return;
+      }
+
+      if (!event.isTyping) {
+        setTypingByChatId((previous) => ({
+          ...previous,
+          [fromUserId]: false,
+        }));
+        return;
+      }
+
+      setTypingByChatId((previous) => ({
+        ...previous,
+        [fromUserId]: true,
+      }));
+
+      window.setTimeout(() => {
+        setTypingByChatId((previous) => ({
+          ...previous,
+          [fromUserId]: false,
+        }));
+      }, 1400);
     };
 
     const handleIncomingMessage = async (event = {}) => {
@@ -381,6 +687,7 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
             fromMe: isFromMe,
             read: isFromMe,
             readAt: null,
+            deliveredAt: incomingTimestamp,
           };
 
           const fp = buildMessageFingerprint(incomingMessage);
@@ -388,9 +695,60 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
             (m) => buildMessageFingerprint(m) === fp,
           );
 
-          const nextMessages = alreadyExists
-            ? chat.messages || []
-            : [...(chat.messages || []), incomingMessage];
+          let nextMessages = chat.messages || [];
+          const incomingClientId = String(event.clientId || "").trim();
+
+          if (isFromMe && incomingClientId) {
+            const clientIndex = nextMessages.findIndex(
+              (message) => message?.clientId === incomingClientId,
+            );
+
+            if (clientIndex >= 0) {
+              nextMessages = nextMessages.map((message, index) =>
+                index === clientIndex
+                  ? {
+                      ...message,
+                      ...incomingMessage,
+                      clientId: incomingClientId,
+                      pending: false,
+                      failed: false,
+                    }
+                  : message,
+              );
+            } else if (!alreadyExists) {
+              nextMessages = [...nextMessages, incomingMessage];
+            }
+          } else if (isFromMe && !alreadyExists) {
+            const pendingIndex = nextMessages.findIndex(
+              (message) =>
+                message?.fromMe &&
+                message?.pending &&
+                !message?.id &&
+                String(message?.text || "").trim() ===
+                  String(incomingMessage.text || "").trim() &&
+                String(message?.imageUrl || "").trim() ===
+                  String(incomingMessage.imageUrl || "").trim() &&
+                String(message?.audioUrl || "").trim() ===
+                  String(incomingMessage.audioUrl || "").trim(),
+            );
+
+            if (pendingIndex >= 0) {
+              nextMessages = nextMessages.map((message, index) =>
+                index === pendingIndex
+                  ? {
+                      ...message,
+                      ...incomingMessage,
+                      pending: false,
+                      failed: false,
+                    }
+                  : message,
+              );
+            } else {
+              nextMessages = [...nextMessages, incomingMessage];
+            }
+          } else if (!alreadyExists) {
+            nextMessages = [...nextMessages, incomingMessage];
+          }
 
           const shouldIncrementUnread =
             !isFromMe &&
@@ -443,12 +801,79 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
       }
     };
 
+    const handleMessageUpdated = (event = {}) => {
+      const messageId = String(event.id || "").trim();
+      if (!messageId) {
+        return;
+      }
+
+      setChats((previous) =>
+        previous.map((chatItem) => {
+          const hasTarget = (chatItem.messages || []).some(
+            (message) => String(message.id || "").trim() === messageId,
+          );
+          if (!hasTarget) {
+            return chatItem;
+          }
+
+          const nextMessages = (chatItem.messages || []).map((message) =>
+            String(message.id || "").trim() === messageId
+              ? {
+                  ...message,
+                  text: String(event.text || ""),
+                  imageUrl: String(event.imageUrl || message.imageUrl || ""),
+                  audioUrl: String(event.audioUrl || message.audioUrl || ""),
+                  edited: true,
+                  editedAt: event.editedAt || new Date().toISOString(),
+                }
+              : message,
+          );
+
+          return {
+            ...chatItem,
+            ...recalculateChatSummary(nextMessages),
+            messages: nextMessages,
+          };
+        }),
+      );
+    };
+
+    const handleMessageDeleted = (event = {}) => {
+      const messageId = String(event.id || "").trim();
+      if (!messageId) {
+        return;
+      }
+
+      setChats((previous) =>
+        previous.map((chatItem) => {
+          const nextMessages = (chatItem.messages || []).filter(
+            (message) => String(message.id || "").trim() !== messageId,
+          );
+
+          if (nextMessages.length === (chatItem.messages || []).length) {
+            return chatItem;
+          }
+
+          return {
+            ...chatItem,
+            ...recalculateChatSummary(nextMessages),
+            messages: nextMessages,
+          };
+        }),
+      );
+    };
+
     socket.on("connect", handleConnected);
     socket.on("disconnect", handleDisconnected);
     socket.io.on("reconnect_attempt", handleReconnectAttempt);
     socket.io.on("reconnect", handleConnected);
     socket.on("connect_error", handleConnectError);
+    socket.on("chat:presence:snapshot", handlePresenceSnapshot);
+    socket.on("chat:user:presence", handlePresenceUpdate);
+    socket.on("chat:typing", handleTyping);
     socket.on("chat:message:new", handleIncomingMessage);
+    socket.on("chat:message:updated", handleMessageUpdated);
+    socket.on("chat:message:deleted", handleMessageDeleted);
     if (socket.connected) handleConnected();
 
     return () => {
@@ -457,7 +882,12 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
       socket.io.off("reconnect_attempt", handleReconnectAttempt);
       socket.io.off("reconnect", handleConnected);
       socket.off("connect_error", handleConnectError);
+      socket.off("chat:presence:snapshot", handlePresenceSnapshot);
+      socket.off("chat:user:presence", handlePresenceUpdate);
+      socket.off("chat:typing", handleTyping);
       socket.off("chat:message:new", handleIncomingMessage);
+      socket.off("chat:message:updated", handleMessageUpdated);
+      socket.off("chat:message:deleted", handleMessageDeleted);
       socket.disconnect();
       socketRef.current = null;
       setSocketStatus("disconnected");
@@ -587,21 +1017,47 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
     );
   };
 
-  const handleSendMessage = async (chat, inputPayload) => {
-    if (!chat?.id || !effectiveUserId) return;
-    if (isSendingMessageRef.current) return;
+  const sendMessageRequest = async ({
+    chatId,
+    text,
+    imageDataUrl,
+    audioDataUrl,
+    clientId,
+  }) => {
+    const response = await fetch(`${API_BASE_URL}/messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(currentUser?.accessToken
+          ? { Authorization: `Bearer ${currentUser.accessToken}` }
+          : {}),
+      },
+      body: JSON.stringify({
+        senderId: effectiveUserId,
+        receiverId: chatId,
+        text,
+        imageDataUrl,
+        audioDataUrl,
+        clientId,
+      }),
+    });
 
-    const { text, imageDataUrl, audioDataUrl } =
-      normalizeOutgoingMessageInput(inputPayload);
-    const normalizedText = String(text || "").trim();
+    const payload = await parseApiPayload(response);
+    if (!response.ok) {
+      if (response.status === 401 || isAuthExpiredMessage(payload.message)) {
+        handleAuthExpired(payload.message || "JWT expired");
+      }
+      throw new Error(payload.message || "Failed to send message.");
+    }
 
-    if (!normalizedText && !imageDataUrl && !audioDataUrl) return;
+    return payload;
+  };
 
-    isSendingMessageRef.current = true;
-    setSendingMessage(true);
-    try {
-      const response = await fetch(`${API_BASE_URL}/messages`, {
-        method: "POST",
+  const editMessageRequest = async ({ messageId, text }) => {
+    const response = await fetch(
+      `${API_BASE_URL}/messages/${encodeURIComponent(messageId)}`,
+      {
+        method: "PATCH",
         headers: {
           "Content-Type": "application/json",
           ...(currentUser?.accessToken
@@ -609,67 +1065,345 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
             : {}),
         },
         body: JSON.stringify({
-          senderId: effectiveUserId,
-          receiverId: chat.id,
-          text: normalizedText,
-          imageDataUrl,
-          audioDataUrl,
+          ownerId: effectiveUserId,
+          text,
         }),
-      });
+      },
+    );
 
-      const payload = await parseApiPayload(response);
-      if (!response.ok) {
-        if (response.status === 401 || isAuthExpiredMessage(payload.message)) {
-          handleAuthExpired(payload.message || "JWT expired");
-        }
-        throw new Error(payload.message || "Failed to send message.");
+    const payload = await parseApiPayload(response);
+    if (!response.ok) {
+      if (response.status === 401 || isAuthExpiredMessage(payload.message)) {
+        handleAuthExpired(payload.message || "JWT expired");
       }
+      throw new Error(payload.message || "Failed to edit message.");
+    }
 
-      const nextMessage = {
-        ...(payload.message || {}),
-        createdAt: payload.message?.timestamp || new Date().toISOString(),
-        timestamp: formatTime(
-          payload.message?.timestamp || new Date().toISOString(),
-        ),
-      };
-      const fp = buildMessageFingerprint(nextMessage);
+    return payload;
+  };
 
-      setChats((prev) => {
-        const updated = prev.map((item) => {
-          if (item.id !== chat.id) return item;
-          const alreadyExists = (item.messages || []).some(
-            (m) => buildMessageFingerprint(m) === fp,
-          );
-          return {
-            ...item,
-            lastMessage: buildLastMessagePreview({
-              text: normalizedText,
-              imageUrl: nextMessage.imageUrl,
-              audioUrl: nextMessage.audioUrl,
-            }),
-            lastMessageFromMe: true,
-            lastMessageAt:
-              payload.message?.timestamp || new Date().toISOString(),
-            time: formatTime(
-              payload.message?.timestamp || new Date().toISOString(),
-            ),
-            unread: 0,
-            messages: alreadyExists
-              ? item.messages || []
-              : [...(item.messages || []), nextMessage],
-          };
-        });
-        return updated.sort(
-          (a, b) =>
-            new Date(b.lastMessageAt || 0).getTime() -
-            new Date(a.lastMessageAt || 0).getTime(),
+  const deleteMessageRequest = async ({ messageId }) => {
+    const response = await fetch(
+      `${API_BASE_URL}/messages/${encodeURIComponent(messageId)}`,
+      {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          ...(currentUser?.accessToken
+            ? { Authorization: `Bearer ${currentUser.accessToken}` }
+            : {}),
+        },
+        body: JSON.stringify({
+          ownerId: effectiveUserId,
+        }),
+      },
+    );
+
+    const payload = await parseApiPayload(response);
+    if (!response.ok) {
+      if (response.status === 401 || isAuthExpiredMessage(payload.message)) {
+        handleAuthExpired(payload.message || "JWT expired");
+      }
+      throw new Error(payload.message || "Failed to delete message.");
+    }
+
+    return payload;
+  };
+
+  const updateOptimisticMessageState = ({
+    chatId,
+    clientId,
+    patch,
+    fallbackPayload,
+    fallbackTimestamp,
+  }) => {
+    setChats((previous) =>
+      previous.map((chatItem) => {
+        if (chatItem.id !== chatId) {
+          return chatItem;
+        }
+
+        const nextMessages = (chatItem.messages || []).map((message) =>
+          message.clientId === clientId ? { ...message, ...patch } : message,
         );
+
+        return {
+          ...chatItem,
+          lastMessage: buildLastMessagePreview(fallbackPayload),
+          lastMessageFromMe: true,
+          lastMessageAt: fallbackTimestamp,
+          time: formatTime(fallbackTimestamp),
+          unread: 0,
+          messages: nextMessages,
+        };
+      }),
+    );
+  };
+
+  const handleRetryFailedMessage = async (chatId, message = {}) => {
+    const nextChatId = String(chatId || "").trim();
+    if (!nextChatId || !effectiveUserId) {
+      return;
+    }
+
+    const clientId = String(message.clientId || message.id || "").trim();
+    if (!clientId) {
+      return;
+    }
+
+    const payload = {
+      text: String(message.text || "").trim(),
+      imageDataUrl: String(
+        message.imageDataUrl || message.imageUrl || "",
+      ).trim(),
+      audioDataUrl: String(
+        message.audioDataUrl || message.audioUrl || "",
+      ).trim(),
+      clientId,
+    };
+
+    const fallbackPayload = {
+      text: payload.text,
+      imageUrl: payload.imageDataUrl,
+      audioUrl: payload.audioDataUrl,
+    };
+
+    updateOptimisticMessageState({
+      chatId: nextChatId,
+      clientId,
+      patch: { failed: false, pending: true },
+      fallbackPayload,
+      fallbackTimestamp: new Date().toISOString(),
+    });
+
+    try {
+      const payloadResult = await sendMessageRequest({
+        chatId: nextChatId,
+        text: payload.text,
+        imageDataUrl: payload.imageDataUrl,
+        audioDataUrl: payload.audioDataUrl,
+        clientId: payload.clientId,
       });
+
+      const deliveredAt =
+        payloadResult.message?.timestamp || new Date().toISOString();
+      const resolvedMessage = {
+        ...(payloadResult.message || {}),
+        clientId: clientId,
+        pending: false,
+        failed: false,
+        deliveredAt,
+        createdAt: deliveredAt,
+        timestamp: formatTime(deliveredAt),
+      };
+
+      updateOptimisticMessageState({
+        chatId: nextChatId,
+        clientId,
+        patch: resolvedMessage,
+        fallbackPayload: {
+          text: payload.text,
+          imageUrl: resolvedMessage.imageUrl,
+          audioUrl: resolvedMessage.audioUrl,
+        },
+        fallbackTimestamp: deliveredAt,
+      });
+      setApiErrorMessage("");
+    } catch (error) {
+      updateOptimisticMessageState({
+        chatId: nextChatId,
+        clientId,
+        patch: { failed: true, pending: false },
+        fallbackPayload,
+        fallbackTimestamp: new Date().toISOString(),
+      });
+      setApiErrorMessage(
+        toFriendlyNetworkError(error, "Failed to send message."),
+      );
+    }
+  };
+
+  const handleSendMessage = async (chat, inputPayload) => {
+    if (!chat?.id || !effectiveUserId) return;
+
+    const { text, imageDataUrl, audioDataUrl } =
+      normalizeOutgoingMessageInput(inputPayload);
+    const normalizedText = String(text || "").trim();
+    const normalizedImage = String(imageDataUrl || "").trim();
+    const normalizedAudio = String(audioDataUrl || "").trim();
+
+    if (!normalizedText && !normalizedImage && !normalizedAudio) return;
+
+    const nowIso = new Date().toISOString();
+    const clientId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const optimisticMessage = {
+      id: null,
+      clientId,
+      text: normalizedText,
+      imageUrl: normalizedImage,
+      audioUrl: normalizedAudio,
+      imageDataUrl: normalizedImage,
+      audioDataUrl: normalizedAudio,
+      timestamp: formatTime(nowIso),
+      createdAt: nowIso,
+      fromMe: true,
+      read: false,
+      readAt: null,
+      deliveredAt: null,
+      pending: true,
+      failed: false,
+    };
+
+    setChats((previous) => {
+      const updated = previous.map((chatItem) => {
+        if (chatItem.id !== chat.id) {
+          return chatItem;
+        }
+
+        return {
+          ...chatItem,
+          lastMessage: buildLastMessagePreview({
+            text: normalizedText,
+            imageUrl: normalizedImage,
+            audioUrl: normalizedAudio,
+          }),
+          lastMessageFromMe: true,
+          lastMessageAt: nowIso,
+          time: formatTime(nowIso),
+          unread: 0,
+          messages: [...(chatItem.messages || []), optimisticMessage],
+        };
+      });
+
+      return updated.sort(
+        (a, b) =>
+          new Date(b.lastMessageAt || 0).getTime() -
+          new Date(a.lastMessageAt || 0).getTime(),
+      );
+    });
+
+    if (isSendingMessageRef.current) {
+      return;
+    }
+
+    isSendingMessageRef.current = true;
+    setSendingMessage(true);
+    try {
+      await handleRetryFailedMessage(chat.id, optimisticMessage);
     } finally {
       isSendingMessageRef.current = false;
       setSendingMessage(false);
     }
   };
+
+  const handleEditMessage = async (chatId, message, nextTextValue) => {
+    const nextChatId = String(chatId || "").trim();
+    const messageId = String(message?.id || "").trim();
+    const nextText = String(nextTextValue || "").trim();
+
+    if (!nextChatId || !messageId) {
+      return;
+    }
+
+    setChats((previous) =>
+      previous.map((chatItem) => {
+        if (chatItem.id !== nextChatId) {
+          return chatItem;
+        }
+
+        const nextMessages = (chatItem.messages || []).map((item) =>
+          String(item.id || "").trim() === messageId
+            ? {
+                ...item,
+                text: nextText,
+                edited: true,
+                editedAt: new Date().toISOString(),
+              }
+            : item,
+        );
+
+        return {
+          ...chatItem,
+          ...recalculateChatSummary(nextMessages),
+          messages: nextMessages,
+        };
+      }),
+    );
+
+    try {
+      await editMessageRequest({ messageId, text: nextText });
+    } catch (error) {
+      setApiErrorMessage(
+        toFriendlyNetworkError(error, "Failed to edit message."),
+      );
+      await fetchMessagesForContact(nextChatId).catch(() => null);
+      throw error;
+    }
+  };
+
+  const handleDeleteMessage = async (chatId, message) => {
+    const nextChatId = String(chatId || "").trim();
+    const messageId = String(message?.id || "").trim();
+
+    if (!nextChatId || !messageId) {
+      return;
+    }
+
+    setChats((previous) =>
+      previous.map((chatItem) => {
+        if (chatItem.id !== nextChatId) {
+          return chatItem;
+        }
+
+        const nextMessages = (chatItem.messages || []).filter(
+          (item) => String(item.id || "").trim() !== messageId,
+        );
+
+        return {
+          ...chatItem,
+          ...recalculateChatSummary(nextMessages),
+          messages: nextMessages,
+        };
+      }),
+    );
+
+    try {
+      await deleteMessageRequest({ messageId });
+    } catch (error) {
+      setApiErrorMessage(
+        toFriendlyNetworkError(error, "Failed to delete message."),
+      );
+      await fetchMessagesForContact(nextChatId).catch(() => null);
+      throw error;
+    }
+  };
+
+  useEffect(() => {
+    if (socketStatus !== "connected" || autoRetryInProgressRef.current) {
+      return;
+    }
+
+    const failedMessages = [];
+    chats.forEach((chatItem) => {
+      (chatItem.messages || []).forEach((message) => {
+        if (message?.fromMe && message?.failed) {
+          failedMessages.push({ chatId: chatItem.id, message });
+        }
+      });
+    });
+
+    if (!failedMessages.length) {
+      return;
+    }
+
+    autoRetryInProgressRef.current = true;
+    (async () => {
+      for (const failedItem of failedMessages.slice(0, 10)) {
+        await handleRetryFailedMessage(failedItem.chatId, failedItem.message);
+      }
+      autoRetryInProgressRef.current = false;
+    })();
+  }, [socketStatus, chats]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -776,9 +1510,10 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
               />
               <button
                 type="button"
-                title="Add new user"
+                title="Invite user"
+                aria-label="Invite user"
                 onClick={() => setIsMobileAddUserOpen(true)}
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/20 bg-white/10 text-lg leading-none text-white/90 transition-colors hover:bg-white/15"
+                className="flex h-11 min-w-[46px] shrink-0 items-center justify-center rounded-xl border border-lime-300/65 bg-lime-300/30 px-3 text-xl font-semibold leading-none text-lime-50 shadow-[0_0_0_1px_rgba(163,230,53,0.15)] transition-colors hover:bg-lime-300/40"
               >
                 +
               </button>
@@ -853,6 +1588,13 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
           <Detail
             chat={selectedChat}
             onSendMessage={handleSendMessage}
+            onEditMessage={handleEditMessage}
+            onDeleteMessage={handleDeleteMessage}
+            onRetryFailedMessage={handleRetryFailedMessage}
+            onRetryConnection={retryNetworkData}
+            onTypingChange={queueTypingSignal}
+            apiErrorMessage={apiErrorMessage}
+            isContactTyping={selectedChatIsTyping}
             sendingMessage={sendingMessage}
             socketStatus={socketStatus}
           />
@@ -879,6 +1621,13 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
         <Detail
           chat={selectedChat}
           onSendMessage={handleSendMessage}
+          onEditMessage={handleEditMessage}
+          onDeleteMessage={handleDeleteMessage}
+          onRetryFailedMessage={handleRetryFailedMessage}
+          onRetryConnection={retryNetworkData}
+          onTypingChange={queueTypingSignal}
+          apiErrorMessage={apiErrorMessage}
+          isContactTyping={selectedChatIsTyping}
           sendingMessage={sendingMessage}
           socketStatus={socketStatus}
         />
