@@ -77,6 +77,21 @@ function ProfileModal({
             className="w-full rounded-lg border border-white/20 bg-black/20 px-3 py-2 text-xs text-white placeholder:text-white/60 outline-none sm:text-sm"
           />
         </div>
+        <div>
+          <p className="mb-1 text-left text-xs text-white/70">Phone</p>
+          <input
+            type="tel"
+            value={draftProfile.phone || ""}
+            onChange={(event) =>
+              setDraftProfile((previous) => ({
+                ...previous,
+                phone: event.target.value,
+              }))
+            }
+            placeholder="+21612345678"
+            className="w-full rounded-lg border border-white/20 bg-black/20 px-3 py-2 text-xs text-white placeholder:text-white/60 outline-none sm:text-sm"
+          />
+        </div>
       </div>
 
       <div className="mt-4 flex justify-end gap-2">

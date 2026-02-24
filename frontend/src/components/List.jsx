@@ -24,6 +24,7 @@ function List({
   const [profile, setProfile] = useState({
     name: currentUser?.name || "My Profile",
     email: currentUser?.email || "",
+    phone: currentUser?.phone || "",
     statusText: currentUser?.statusText || "",
     image: currentUser?.image || "",
   });
@@ -57,6 +58,7 @@ function List({
       ...previous,
       name: currentUser.name || previous.name,
       email: currentUser.email || previous.email,
+      phone: currentUser.phone || previous.phone,
       statusText: currentUser.statusText || previous.statusText,
       image: currentUser.image || previous.image,
     }));

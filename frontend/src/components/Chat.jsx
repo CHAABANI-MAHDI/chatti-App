@@ -55,6 +55,7 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
   const [mobileProfile, setMobileProfile] = useState({
     name: currentUser?.name || "My Profile",
     email: currentUser?.email || "",
+    phone: currentUser?.phone || "",
     statusText: currentUser?.statusText || "",
     image: currentUser?.image || "",
   });
@@ -452,6 +453,7 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
       ...prev,
       name: currentUser.name || prev.name,
       email: currentUser.email || prev.email,
+      phone: currentUser.phone || prev.phone,
       statusText: currentUser.statusText || prev.statusText,
       image: currentUser.image || prev.image,
     }));

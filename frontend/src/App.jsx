@@ -374,7 +374,7 @@ const App = () => {
     }
 
     const savedProfile = await saveProfile({
-      phone: updates?.phone || currentUser.phone || "",
+      phone: updates?.phone ?? currentUser.phone ?? "",
       email: updates?.email || currentUser.email || "",
       name: updates?.name || currentUser.name || "User",
       image: updates?.image || "",
