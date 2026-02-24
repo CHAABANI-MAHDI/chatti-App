@@ -318,6 +318,7 @@ const buildContext = () => {
 
   const mapContactPreview = async (record = {}, profileClient = null) => ({
     id: record.id || null,
+    email: normalizeEmail(record.email || ""),
     phone: formatPhoneFromDb(record.phone),
     name: record.display_name || "User",
     image: await resolveAvatarForClient(record.avatar_url || "", profileClient),

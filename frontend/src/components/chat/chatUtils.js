@@ -11,6 +11,7 @@ export const parseApiPayload = async (response) => {
 export const mapProfileToChat = (profile) => ({
   id: profile.id || "",
   name: profile.name || "User",
+  email: profile.email || "",
   status: "Online",
   lastSeen: "Available",
   avatar: profile.name?.trim()?.charAt(0)?.toUpperCase() || "U",

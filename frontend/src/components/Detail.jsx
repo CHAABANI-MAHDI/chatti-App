@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import EmojiPicker from "emoji-picker-react";
 import VoicePlayback from "./detail/VoicePlayback";
 import { formatDuration } from "./detail/formatDuration";
@@ -37,6 +37,18 @@ function Detail({
 
   const chatMessages = Array.isArray(chat?.messages) ? chat.messages : [];
   const lastMessage = chatMessages[chatMessages.length - 1] || null;
+  const sharedImages = useMemo(() => {
+    const uniqueImages = new Set();
+
+    for (let index = chatMessages.length - 1; index >= 0; index -= 1) {
+      const imageUrl = String(chatMessages[index]?.imageUrl || "").trim();
+      if (imageUrl) {
+        uniqueImages.add(imageUrl);
+      }
+    }
+
+    return Array.from(uniqueImages);
+  }, [chatMessages]);
 
   // Reset state when switching chats
   useEffect(() => {
@@ -658,7 +670,11 @@ function Detail({
 
   // ── Info panel ─────────────────────────────────────────────────────────────
   const infoContent = (
-    <DetailInfoPanel chat={chat} avatarInitial={avatarInitial} />
+    <DetailInfoPanel
+      chat={chat}
+      avatarInitial={avatarInitial}
+      sharedImages={sharedImages}
+    />
   );
 
   // ── Root layout ────────────────────────────────────────────────────────────
