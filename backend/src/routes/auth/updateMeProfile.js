@@ -284,7 +284,15 @@ const registerUpdateMeProfileRoute = (app, ctx) => {
       email: targetEmail,
       phone: nextPhone || "",
       image:
-        resolvedAvatarUrl || String(existingMetadata.image || "").trim() || "",
+        resolvedAvatarUrl ||
+        String(
+          existingMetadata.image ||
+            existingMetadata.avatar_url ||
+            existingMetadata.picture ||
+            existingMetadata.photoURL ||
+            "",
+        ).trim() ||
+        "",
     };
 
     const authUpdatePayload = {

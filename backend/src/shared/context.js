@@ -329,6 +329,14 @@ const buildContext = () => {
     const normalizedPhone = normalizePhone(
       String(metadata.phone || user?.phone || ""),
     );
+    const resolvedImage = String(
+      metadata.image ||
+        metadata.avatar_url ||
+        metadata.picture ||
+        metadata.photoURL ||
+        user?.avatar_url ||
+        "",
+    ).trim();
     const fallbackName = normalizedEmail
       ? normalizedEmail.split("@")[0]
       : "User";
@@ -340,7 +348,7 @@ const buildContext = () => {
       name:
         String(metadata.full_name || metadata.name || "").trim() ||
         fallbackName,
-      image: String(metadata.image || "").trim(),
+      image: resolvedImage,
       statusText: String(metadata.statusText || "").trim(),
     };
   };

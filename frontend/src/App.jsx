@@ -225,6 +225,32 @@ const App = () => {
           }
         }
 
+        if (
+          existingProfile &&
+          !String(existingProfile.image || "").trim() &&
+          String(authUser.image || "").trim() &&
+          authUser.accessToken
+        ) {
+          try {
+            const syncedProfile = await saveProfile({
+              name: existingProfile.name || authUser.name || "User",
+              image: authUser.image,
+              email: authUser.email || "",
+              phone: existingProfile.phone || authUser.phone || "",
+              accessToken: authUser.accessToken,
+            });
+
+            if (syncedProfile) {
+              existingProfile = {
+                ...existingProfile,
+                ...syncedProfile,
+              };
+            }
+          } catch {
+            // Keep sign-in successful even if profile avatar sync fails.
+          }
+        }
+
         const profileId = String(existingProfile?.id || "").trim();
         startUserSession(
           {
