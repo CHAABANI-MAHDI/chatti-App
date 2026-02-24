@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import OverlayModal from "../shared/OverlayModal";
 
 const normalizeQuery = (value = "") => String(value || "").trim();
+const PAGE_SIZE = 20;
 
 function AddUserByPhoneModal({
   isOpen,
@@ -16,8 +17,15 @@ function AddUserByPhoneModal({
   const [queryInput, setQueryInput] = useState("");
   const [profiles, setProfiles] = useState([]);
   const [addingUserId, setAddingUserId] = useState("");
+  const [hideAddedUsers, setHideAddedUsers] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [pagination, setPagination] = useState({
+    nextOffset: 0,
+    hasMore: false,
+  });
   const [status, setStatus] = useState("idle");
   const [errorMessage, setErrorMessage] = useState("");
+  const requestIdRef = useRef(0);
 
   const normalizedQuery = useMemo(
     () => normalizeQuery(queryInput),
@@ -34,58 +42,120 @@ function AddUserByPhoneModal({
       setQueryInput("");
       setProfiles([]);
       setAddingUserId("");
+      setHideAddedUsers(false);
+      setIsLoadingMore(false);
+      setPagination({ nextOffset: 0, hasMore: false });
       setStatus("idle");
       setErrorMessage("");
     }
   }, [isOpen]);
 
-  useEffect(() => {
-    let isActive = true;
-    const searchProfiles = onSearchUsers || onSearchUser;
-
-    if (!isOpen || !searchProfiles) {
-      return () => {
-        isActive = false;
-      };
+  const visibleProfiles = useMemo(() => {
+    if (!hideAddedUsers) {
+      return profiles;
     }
 
-    const runLookup = async () => {
-      setErrorMessage("");
+    return profiles.filter((profile) => !existingIdSet.has(profile.id));
+  }, [profiles, hideAddedUsers, existingIdSet]);
+
+  const extractSearchPayload = (result) => {
+    const fallbackProfiles = Array.isArray(result)
+      ? result
+      : result
+        ? [result]
+        : [];
+    const mappedProfiles = Array.isArray(result?.profiles)
+      ? result.profiles
+      : fallbackProfiles;
+    const payloadPagination = result?.pagination || {};
+
+    return {
+      profiles: mappedProfiles,
+      hasMore: Boolean(payloadPagination.hasMore),
+      nextOffset: Number.isFinite(payloadPagination.nextOffset)
+        ? payloadPagination.nextOffset
+        : mappedProfiles.length,
+    };
+  };
+
+  const fetchProfilesPage = async ({ append, offset }) => {
+    const searchProfiles = onSearchUsers || onSearchUser;
+    if (!searchProfiles) {
+      return;
+    }
+
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+
+    if (append) {
+      setIsLoadingMore(true);
+    } else {
       setStatus("loading");
+      setErrorMessage("");
+    }
 
-      try {
-        const result = await searchProfiles(normalizedQuery);
-        if (!isActive) {
-          return;
+    try {
+      const result = await searchProfiles(normalizedQuery, {
+        limit: PAGE_SIZE,
+        offset,
+      });
+
+      if (requestIdRef.current !== requestId) {
+        return;
+      }
+
+      const payload = extractSearchPayload(result);
+      const filteredProfiles = payload.profiles.filter(
+        (profile) => profile?.id && profile.id !== currentUserId,
+      );
+
+      setProfiles((previous) => {
+        if (!append) {
+          return filteredProfiles;
         }
 
-        const fetchedProfiles = Array.isArray(result)
-          ? result
-          : result
-            ? [result]
-            : [];
-
-        const filteredProfiles = fetchedProfiles.filter(
-          (profile) => profile?.id && profile.id !== currentUserId,
+        const uniqueProfiles = new Map(
+          previous.map((profile) => [profile.id, profile]),
         );
+        filteredProfiles.forEach((profile) => {
+          uniqueProfiles.set(profile.id, profile);
+        });
 
-        setProfiles(filteredProfiles);
-        setStatus("ready");
-      } catch (error) {
-        if (!isActive) {
-          return;
-        }
+        return Array.from(uniqueProfiles.values());
+      });
 
+      setPagination({
+        hasMore: payload.hasMore,
+        nextOffset: payload.nextOffset,
+      });
+      setStatus("ready");
+    } catch (error) {
+      if (requestIdRef.current !== requestId) {
+        return;
+      }
+
+      if (!append) {
         setProfiles([]);
         setStatus("error");
-        setErrorMessage(error.message || "Failed to fetch users.");
       }
-    };
+      setErrorMessage(error.message || "Failed to fetch users.");
+    } finally {
+      if (requestIdRef.current === requestId) {
+        setIsLoadingMore(false);
+      }
+    }
+  };
 
-    const timeoutId = setTimeout(runLookup, 220);
+  useEffect(() => {
+    if (!isOpen) {
+      return undefined;
+    }
+
+    const timeoutId = setTimeout(() => {
+      fetchProfilesPage({ append: false, offset: 0 });
+    }, 220);
 
     return () => {
-      isActive = false;
       clearTimeout(timeoutId);
     };
   }, [isOpen, normalizedQuery, currentUserId, onSearchUsers, onSearchUser]);
@@ -131,6 +201,16 @@ function AddUserByPhoneModal({
         className="mt-3 w-full rounded-xl border border-white/20 bg-black/20 px-3 py-2 text-xs text-white placeholder:text-white/55 outline-none transition-colors focus:border-lime-200/45 sm:text-sm"
       />
 
+      <label className="mt-2 flex items-center gap-2 text-xs text-white/75">
+        <input
+          type="checkbox"
+          checked={hideAddedUsers}
+          onChange={(event) => setHideAddedUsers(event.target.checked)}
+          className="h-3.5 w-3.5 accent-lime-300"
+        />
+        Hide already added users
+      </label>
+
       {status === "loading" && (
         <p className="mt-3 text-xs text-white/70">Loading users...</p>
       )}
@@ -139,13 +219,13 @@ function AddUserByPhoneModal({
         <p className="mt-3 text-xs text-red-200">{errorMessage}</p>
       )}
 
-      {status === "ready" && profiles.length === 0 && (
+      {status === "ready" && visibleProfiles.length === 0 && (
         <p className="mt-3 text-xs text-white/70">No users found.</p>
       )}
 
-      {profiles.length > 0 && (
+      {visibleProfiles.length > 0 && (
         <div className="mt-3 max-h-[48dvh] space-y-2 overflow-y-auto pr-1">
-          {profiles.map((profile) => {
+          {visibleProfiles.map((profile) => {
             const profileInitial =
               profile?.name?.trim()?.charAt(0)?.toUpperCase() || "U";
             const alreadyAdded = existingIdSet.has(profile.id);
@@ -188,6 +268,22 @@ function AddUserByPhoneModal({
               </div>
             );
           })}
+
+          {pagination.hasMore && (
+            <button
+              type="button"
+              onClick={() =>
+                fetchProfilesPage({
+                  append: true,
+                  offset: pagination.nextOffset,
+                })
+              }
+              disabled={isLoadingMore}
+              className="w-full rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-xs text-white/90 transition-colors hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isLoadingMore ? "Loading more..." : "Load more users"}
+            </button>
+          )}
         </div>
       )}
     </OverlayModal>

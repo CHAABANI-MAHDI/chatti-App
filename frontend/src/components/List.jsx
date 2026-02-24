@@ -184,6 +184,7 @@ function List({
         existingIds={chats.map((chat) => chat.id).filter(Boolean)}
         currentUserId={currentUser?.id || ""}
         onSearchUser={onSearchUser}
+        onSearchUsers={onSearchUser}
         onAddUser={onAddUser}
       />
     </aside>

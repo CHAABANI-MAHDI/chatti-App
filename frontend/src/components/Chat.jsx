@@ -509,9 +509,16 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
     }
   };
 
-  const searchUserByNameOrEmail = async (query) => {
+  const searchUserByNameOrEmail = async (query, options = {}) => {
+    const requestedLimit = Number.isFinite(Number(options?.limit))
+      ? Number(options.limit)
+      : 20;
+    const requestedOffset = Number.isFinite(Number(options?.offset))
+      ? Number(options.offset)
+      : 0;
+
     const response = await fetch(
-      `${API_BASE_URL}/profiles/search?query=${encodeURIComponent(query)}&excludeId=${encodeURIComponent(effectiveUserId)}`,
+      `${API_BASE_URL}/profiles/search?query=${encodeURIComponent(query)}&excludeId=${encodeURIComponent(effectiveUserId)}&limit=${encodeURIComponent(requestedLimit)}&offset=${encodeURIComponent(requestedOffset)}`,
       {
         headers: currentUser?.accessToken
           ? { Authorization: `Bearer ${currentUser.accessToken}` }
@@ -525,10 +532,22 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
       }
       throw new Error(payload.message || "Failed to find user.");
     }
-    if (Array.isArray(payload.profiles)) {
-      return payload.profiles;
-    }
-    return payload.profile ? [payload.profile] : [];
+
+    const profiles = Array.isArray(payload.profiles)
+      ? payload.profiles
+      : payload.profile
+        ? [payload.profile]
+        : [];
+
+    return {
+      profiles,
+      pagination: {
+        hasMore: Boolean(payload?.pagination?.hasMore),
+        nextOffset: Number.isFinite(payload?.pagination?.nextOffset)
+          ? payload.pagination.nextOffset
+          : requestedOffset + profiles.length,
+      },
+    };
   };
 
   const addUserToChats = async (profile) => {
@@ -823,6 +842,7 @@ function Chat({ currentUser, onLogout, onProfileSave }) {
           existingIds={chats.map((chat) => chat.id).filter(Boolean)}
           currentUserId={currentUser?.id || ""}
           onSearchUser={searchUserByNameOrEmail}
+          onSearchUsers={searchUserByNameOrEmail}
           onAddUser={addUserToChats}
           containerClassName="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm md:hidden"
         />

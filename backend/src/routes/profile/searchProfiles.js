@@ -15,6 +15,14 @@ const registerSearchProfilesRoute = (app, ctx) => {
 
     const rawQuery = String(req.query?.query || "").trim();
     const rawExcludeId = String(req.query?.excludeId || "").trim();
+    const parsedLimit = Number.parseInt(String(req.query?.limit || "20"), 10);
+    const parsedOffset = Number.parseInt(String(req.query?.offset || "0"), 10);
+    const limit = Number.isFinite(parsedLimit)
+      ? Math.min(Math.max(parsedLimit, 1), 50)
+      : 20;
+    const offset = Number.isFinite(parsedOffset)
+      ? Math.max(parsedOffset, 0)
+      : 0;
 
     if (rawExcludeId && !isUuid(rawExcludeId)) {
       return res.status(400).json({
@@ -38,6 +46,7 @@ const registerSearchProfilesRoute = (app, ctx) => {
 
     let rows = [];
     let queryError = null;
+    const rangeEnd = offset + limit;
 
     if (!rawQuery) {
       const { data, error } = await applyExclusions(
@@ -45,7 +54,7 @@ const registerSearchProfilesRoute = (app, ctx) => {
           .from(ctx.profilesTable)
           .select(baseSelect)
           .order("display_name", { ascending: true })
-          .limit(50),
+          .range(offset, rangeEnd),
       );
 
       rows = data || [];
@@ -56,44 +65,26 @@ const registerSearchProfilesRoute = (app, ctx) => {
           .from(ctx.profilesTable)
           .select(baseSelect)
           .eq("email", ctx.normalizeEmail(rawQuery))
-          .limit(20),
+          .order("display_name", { ascending: true })
+          .range(offset, rangeEnd),
       );
 
       rows = data || [];
       queryError = error;
     } else {
-      const { data: byName, error: byNameError } = await applyExclusions(
+      const { data, error } = await applyExclusions(
         profileClient
           .from(ctx.profilesTable)
           .select(baseSelect)
-          .ilike("display_name", `%${rawQuery}%`)
-          .limit(25),
+          .or(
+            `display_name.ilike.%${rawQuery}%,email.ilike.%${normalizedQuery}%`,
+          )
+          .order("display_name", { ascending: true })
+          .range(offset, rangeEnd),
       );
 
-      if (byNameError) {
-        queryError = byNameError;
-      } else {
-        const { data: byEmail, error: byEmailError } = await applyExclusions(
-          profileClient
-            .from(ctx.profilesTable)
-            .select(baseSelect)
-            .ilike("email", `%${normalizedQuery}%`)
-            .limit(25),
-        );
-
-        if (byEmailError) {
-          queryError = byEmailError;
-        } else {
-          const uniqueRows = new Map();
-          [...(byName || []), ...(byEmail || [])].forEach((row) => {
-            if (row?.id && !uniqueRows.has(row.id)) {
-              uniqueRows.set(row.id, row);
-            }
-          });
-
-          rows = Array.from(uniqueRows.values());
-        }
-      }
+      rows = data || [];
+      queryError = error;
     }
 
     if (queryError) {
@@ -143,10 +134,18 @@ const registerSearchProfilesRoute = (app, ctx) => {
           ),
         ]
       : mappedProfiles;
+    const hasMore = rows.length > limit;
+    const slicedProfiles = profiles.slice(0, limit);
 
     return res.status(200).json({
-      profile: profiles[0] || null,
-      profiles,
+      profile: slicedProfiles[0] || null,
+      profiles: slicedProfiles,
+      pagination: {
+        limit,
+        offset,
+        nextOffset: offset + slicedProfiles.length,
+        hasMore,
+      },
     });
   });
 };
